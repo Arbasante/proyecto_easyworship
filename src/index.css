@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sidebar: #111111;
+  --color-mainbg: #1a1a1a;
+  --color-panel: #252525;
+  --color-accent: #0078d4;
+  --color-live: #e81123;
+}
+
+body {
+  @apply bg-mainbg text-gray-200 overflow-hidden select-none;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
