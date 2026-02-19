@@ -7,42 +7,23 @@ use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 // --- ESTRUCTURAS ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct Verse {
-    libro: String,
-    capitulo: i32,
-    versiculo: i32,
-    texto: String,
-}
+struct Verse { libro: String, capitulo: i32, versiculo: i32, texto: String }
 
 #[derive(Serialize)]
-struct BookInfo {
-    nombre: String,
-    capitulos: i32,
-}
+struct BookInfo { nombre: String, capitulos: i32 }
 
 #[derive(Serialize)]
-struct Canto {
-    id: i32,
-    titulo: String,
-    tono: String,
-    categoria: String,
-}
+struct Canto { id: i32, titulo: String, tono: String, categoria: String }
 
 #[derive(Serialize)]
-struct Diapositiva {
-    id: i32,
-    orden: i32,
-    texto: String,
-}
+struct Diapositiva { id: i32, orden: i32, texto: String }
 
-// NUEVA ESTRUCTURA: Imagen (Añadido 'aspecto')
 #[derive(Serialize)]
-struct Imagen {
-    id: i32,
-    nombre: String,
-    ruta: String,
-    aspecto: String, 
-}
+struct Imagen { id: i32, nombre: String, ruta: String, aspecto: String }
+
+// NUEVA ESTRUCTURA: Video
+#[derive(Serialize)]
+struct Video { id: i32, nombre: String, ruta: String }
 
 // --- ESTADO GLOBAL ---
 struct AppState {
@@ -58,9 +39,7 @@ struct AppState {
 fn get_all_cantos(state: State<AppState>) -> Result<Vec<Canto>, String> {
     let conn = state.cantos_db.lock().map_err(|_| "Error de concurrencia")?;
     let mut stmt = conn.prepare("SELECT id, titulo, COALESCE(tono, ''), COALESCE(categoria, '') FROM cantos ORDER BY titulo").map_err(|e| e.to_string())?;
-    let iter = stmt.query_map([], |row| {
-        Ok(Canto { id: row.get(0)?, titulo: row.get(1)?, tono: row.get(2)?, categoria: row.get(3)? })
-    }).map_err(|e| e.to_string())?;
+    let iter = stmt.query_map([], |row| { Ok(Canto { id: row.get(0)?, titulo: row.get(1)?, tono: row.get(2)?, categoria: row.get(3)? }) }).map_err(|e| e.to_string())?;
     Ok(iter.filter_map(Result::ok).collect())
 }
 
@@ -68,9 +47,7 @@ fn get_all_cantos(state: State<AppState>) -> Result<Vec<Canto>, String> {
 fn get_canto_diapositivas(canto_id: i32, state: State<AppState>) -> Result<Vec<Diapositiva>, String> {
     let conn = state.cantos_db.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, orden, texto FROM diapositivas WHERE canto_id = ? ORDER BY orden").unwrap();
-    let iter = stmt.query_map(params![canto_id], |row| {
-        Ok(Diapositiva { id: row.get(0)?, orden: row.get(1)?, texto: row.get(2)? })
-    }).unwrap();
+    let iter = stmt.query_map(params![canto_id], |row| { Ok(Diapositiva { id: row.get(0)?, orden: row.get(1)?, texto: row.get(2)? }) }).unwrap();
     Ok(iter.filter_map(Result::ok).collect())
 }
 
@@ -117,26 +94,19 @@ fn delete_canto(id: i32, state: State<AppState>) -> Result<(), String> {
 }
 
 // ==========================================
-// COMANDOS DE IMÁGENES (ACTUALIZADOS)
+// COMANDOS DE IMÁGENES
 // ==========================================
 #[tauri::command]
 fn get_all_images(state: State<AppState>) -> Result<Vec<Imagen>, String> {
     let conn = state.multimedia_db.lock().unwrap();
-    // Leemos el aspecto. Si por alguna razón es nulo, mandamos 'contain'
     let mut stmt = conn.prepare("SELECT id, nombre, ruta, COALESCE(aspecto, 'contain') FROM imagenes ORDER BY id DESC").unwrap();
-    let iter = stmt.query_map([], |row| Ok(Imagen { 
-        id: row.get(0)?, 
-        nombre: row.get(1)?, 
-        ruta: row.get(2)?, 
-        aspecto: row.get(3)? 
-    })).unwrap();
+    let iter = stmt.query_map([], |row| Ok(Imagen { id: row.get(0)?, nombre: row.get(1)?, ruta: row.get(2)?, aspecto: row.get(3)? })).unwrap();
     Ok(iter.filter_map(Result::ok).collect())
 }
 
 #[tauri::command]
 fn add_image_db(nombre: String, ruta: String, state: State<AppState>) -> Result<(), String> {
     let conn = state.multimedia_db.lock().unwrap();
-    // Al guardar, por defecto es 'contain'
     conn.execute("INSERT INTO imagenes (nombre, ruta, aspecto) VALUES (?, ?, 'contain')", params![nombre, ruta]).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -156,16 +126,54 @@ fn update_image_aspect(id: i32, aspecto: String, state: State<AppState>) -> Resu
 }
 
 // ==========================================
+// NUEVO: COMANDOS DE VIDEOS
+// ==========================================
+#[tauri::command]
+fn get_all_videos(state: State<AppState>) -> Result<Vec<Video>, String> {
+    let conn = state.multimedia_db.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, nombre, ruta FROM videos ORDER BY id DESC").unwrap();
+    let iter = stmt.query_map([], |row| Ok(Video { id: row.get(0)?, nombre: row.get(1)?, ruta: row.get(2)? })).unwrap();
+    Ok(iter.filter_map(Result::ok).collect())
+}
+
+#[tauri::command]
+fn add_video_db(nombre: String, ruta: String, state: State<AppState>) -> Result<(), String> {
+    let conn = state.multimedia_db.lock().unwrap();
+    conn.execute("INSERT INTO videos (nombre, ruta) VALUES (?, ?)", params![nombre, ruta]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_video_db(id: i32, state: State<AppState>) -> Result<(), String> {
+    let conn = state.multimedia_db.lock().unwrap();
+    conn.execute("DELETE FROM videos WHERE id = ?", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn select_video_file(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let file_path = app.dialog()
+        .file()
+        .add_filter("Videos", &["mp4", "webm", "mkv", "mov", "avi"])
+        .blocking_pick_file();
+    file_path.map(|path| path.to_string())
+}
+
+#[tauri::command]
+fn trigger_video_control(app: tauri::AppHandle, action: String) {
+    if let Some(projector_window) = app.get_webview_window("projector") {
+        let _ = projector_window.emit("video-control", &action);
+    }
+}
+
+// ==========================================
 // COMANDOS BIBLIA Y GENERALES
 // ==========================================
 #[tauri::command]
 async fn select_background_image(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
-    let file_path = app.dialog()
-        .file()
-        .add_filter("Imágenes", &["png", "jpg", "jpeg", "webp", "gif"])
-        .blocking_pick_file();
-
+    let file_path = app.dialog().file().add_filter("Imágenes", &["png", "jpg", "jpeg", "webp", "gif"]).blocking_pick_file();
     file_path.map(|path| path.to_string())
 }
 
@@ -245,19 +253,11 @@ fn setup_db(db_name: &str) -> Connection {
 
 fn setup_multimedia_db() -> Connection {
     let conn = setup_db("multimedia.db");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS imagenes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL,
-            ruta TEXT NOT NULL,
-            aspecto TEXT DEFAULT 'contain'
-        )",
-        [],
-    ).unwrap();
-    
-    // TRUCO: Si ya tenías la tabla de antes, esto le agregará la columna sin borrar nada. 
-    // Si la columna ya existe, fallará en silencio y no afectará el programa.
+    conn.execute("CREATE TABLE IF NOT EXISTS imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, aspecto TEXT DEFAULT 'contain')", []).unwrap();
     let _ = conn.execute("ALTER TABLE imagenes ADD COLUMN aspecto TEXT DEFAULT 'contain'", []);
+    
+    // NUEVA TABLA: VIDEOS
+    conn.execute("CREATE TABLE IF NOT EXISTS videos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL)", []).unwrap();
     
     conn
 }
@@ -293,7 +293,13 @@ fn main() {
             get_all_images,
             add_image_db,
             delete_image_db,
-            update_image_aspect // <--- NO OLVIDAR ESTE
+            update_image_aspect,
+            // NUEVOS HANDLERS DE VIDEO
+            get_all_videos,
+            add_video_db,
+            delete_video_db,
+            select_video_file,
+            trigger_video_control
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

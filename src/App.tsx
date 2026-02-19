@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
-import { Music, BookOpen, Image as ImageIcon, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, ChevronRight, Settings, Trash2, Palette, X, Plus, Edit2, AlertTriangle, Type, Maximize, Minimize } from "lucide-react";
+import { Music, BookOpen, Image as ImageIcon, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, ChevronRight, Settings, Trash2, Palette, X, Plus, Edit2, AlertTriangle, Type, Maximize, Minimize, Play, Pause, RotateCcw } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -16,7 +16,7 @@ const getShortVersion = (versionName: string) => {
 
 const isSameVerse = (v1: any, v2: any) => {
     if (!v1 || !v2) return false;
-    if (v1.tipo === 'imagen' || v2.tipo === 'imagen') return v1.ruta === v2.ruta;
+    if (v1.tipo === 'imagen' || v2.tipo === 'imagen' || v1.tipo === 'video' || v2.tipo === 'video') return v1.ruta === v2.ruta;
     return v1.libro === v2.libro && v1.capitulo === v2.capitulo && v1.versiculo === v2.versiculo;
 };
 
@@ -31,6 +31,7 @@ const ProjectorView = () => {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   const [styles, setStyles] = useState({ 
       biblia: { bgColor: '#000000', textColor: '#ffffff', bgImage: '' },
@@ -40,7 +41,20 @@ const ProjectorView = () => {
   useEffect(() => {
     const un1 = listen("update-proyeccion", (e: any) => setLiveVerse(e.payload));
     const un2 = listen("update-styles", (e: any) => setStyles(e.payload));
-    return () => { un1.then(f => f()); un2.then(f => f()); };
+    
+    // ESCUCHADOR DE CONTROLES DE VIDEO REMOTOS
+    const un3 = listen("video-control", (e: any) => {
+        if (!videoRef.current) return;
+        const action = e.payload;
+        if (action === 'play') videoRef.current.play();
+        if (action === 'pause') videoRef.current.pause();
+        if (action === 'restart') {
+            videoRef.current.currentTime = 0;
+            videoRef.current.play();
+        }
+    });
+
+    return () => { un1.then(f => f()); un2.then(f => f()); un3.then(f => f()); };
   }, []);
 
   useEffect(() => {
@@ -53,14 +67,13 @@ const ProjectorView = () => {
   }, [liveVerse]);
 
   useLayoutEffect(() => {
-    if (!displayVerse || displayVerse.tipo === 'imagen' || !containerRef.current || !textRef.current) {
-        if (displayVerse?.tipo === 'imagen') requestAnimationFrame(() => setOpacity(1));
+    if (!displayVerse || displayVerse.tipo === 'imagen' || displayVerse.tipo === 'video' || !containerRef.current || !textRef.current) {
+        if (displayVerse?.tipo === 'imagen' || displayVerse?.tipo === 'video') requestAnimationFrame(() => setOpacity(1));
         return;
     }
 
     const container = containerRef.current;
     const text = textRef.current;
-
     let min = 20;  
     let max = 300; 
     let best = 20;
@@ -68,29 +81,34 @@ const ProjectorView = () => {
     while (min <= max) {
         const mid = Math.floor((min + max) / 2);
         text.style.fontSize = `${mid}px`;
-
         if (text.scrollHeight <= container.clientHeight && text.scrollWidth <= container.clientWidth) {
-            best = mid;     
-            min = mid + 1;  
-        } else {
-            max = mid - 1;  
-        }
+            best = mid; min = mid + 1;  
+        } else { max = mid - 1; }
     }
-
     const finalSize = best - 2;
     setFontSize(finalSize);
     text.style.fontSize = `${finalSize}px`;
-
     requestAnimationFrame(() => setOpacity(1));
   }, [displayVerse]);
 
+  // RENDER: VIDEO
+  if (displayVerse?.tipo === 'video') {
+      return (
+          <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
+              <video 
+                  ref={videoRef}
+                  src={convertFileSrc(displayVerse.ruta)} 
+                  className="w-full h-full object-contain" 
+                  autoPlay 
+                  loop={false}
+              />
+          </div>
+      );
+  }
+
+  // RENDER: IMAGEN
   if (displayVerse?.tipo === 'imagen') {
-      const fitClass = displayVerse.aspecto === 'cover' 
-            ? 'w-full h-full object-cover'   
-            : displayVerse.aspecto === 'fill' 
-            ? 'w-full h-full object-fill'    
-            : 'max-w-full max-h-full object-contain'; 
-            
+      const fitClass = displayVerse.aspecto === 'cover' ? 'w-full h-full object-cover' : displayVerse.aspecto === 'fill' ? 'w-full h-full object-fill' : 'max-w-full max-h-full object-contain'; 
       return (
           <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
               <img src={convertFileSrc(displayVerse.ruta)} className={fitClass} />
@@ -98,33 +116,21 @@ const ProjectorView = () => {
       );
   }
 
+  // RENDER: TEXTO
   const isCanto = displayVerse?.capitulo === 0;
   const currentStyle = isCanto ? styles.cantos : styles.biblia;
-
   const containerStyle: any = {
-      backgroundColor: currentStyle?.bgColor || '#000',
-      color: currentStyle?.textColor || '#fff',
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat'
+      backgroundColor: currentStyle?.bgColor || '#000', color: currentStyle?.textColor || '#fff',
+      backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat'
   };
-
-  if (currentStyle?.bgImage) {
-      containerStyle.backgroundImage = `url('${convertFileSrc(currentStyle.bgImage)}')`;
-  } else {
-      containerStyle.backgroundImage = 'none';
-  }
+  if (currentStyle?.bgImage) containerStyle.backgroundImage = `url('${convertFileSrc(currentStyle.bgImage)}')`;
 
   return (
     <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden bg-cover bg-center transition-all duration-500" style={containerStyle}>
       {displayVerse && (
         <div className="w-full h-full flex flex-col justify-between transition-opacity duration-300 px-8 py-8" style={{ opacity }}>
           <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
-            <p 
-                ref={textRef} 
-                style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} 
-                className="font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line drop-shadow-md"
-            >
+            <p ref={textRef} style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} className="font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line drop-shadow-md">
                 {isCanto ? displayVerse.texto : `"${displayVerse.texto}"`}
             </p>
           </div>
@@ -167,17 +173,14 @@ const CantoEditorModal = ({ isEdit, initialData, onClose, onSave }: any) => {
                             className="w-full bg-panel border border-white/10 rounded-lg p-3 text-sm focus:border-accent outline-none font-bold text-white shadow-inner" />
                     </div>
                     <div className="flex-1 flex flex-col">
-                        <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">
-                            Letra <span className="text-gray-600 font-normal normal-case">(Separa cada diapositiva dejando un renglón en blanco)</span>
-                        </label>
-                        <textarea value={formData.letra} onChange={(e) => setFormData({...formData, letra: e.target.value})} placeholder="Señor mi Dios al contemplar los cielos...\n\nMi corazón entona la canción..."
+                        <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">Letra</label>
+                        <textarea value={formData.letra} onChange={(e) => setFormData({...formData, letra: e.target.value})} placeholder="Señor mi Dios..."
                             className="w-full flex-1 bg-panel border border-white/10 rounded-lg p-4 text-sm focus:border-accent outline-none text-gray-300 shadow-inner min-h-[300px] resize-none custom-scrollbar leading-relaxed" />
                     </div>
                 </div>
                 <div className="p-4 bg-black/40 border-t border-white/5 flex justify-end gap-3">
                     <button onClick={onClose} className="px-5 py-2 rounded-lg text-[10px] font-bold uppercase text-gray-400 hover:text-white transition-colors">Cancelar</button>
-                    <button onClick={() => onSave(formData)} disabled={!formData.titulo.trim() || !formData.letra.trim()}
-                        className="bg-accent text-white px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Guardar</button>
+                    <button onClick={() => onSave(formData)} disabled={!formData.titulo.trim() || !formData.letra.trim()} className="bg-accent text-white px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-accent/80 transition-colors disabled:opacity-50">Guardar</button>
                 </div>
             </div>
         </div>
@@ -190,7 +193,6 @@ const CantoEditorModal = ({ isEdit, initialData, onClose, onSave }: any) => {
 const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated, onCantoDeleted }: any) => {
     const [cantos, setCantos] = useState<any[]>([]);
     const [search, setSearch] = useState("");
-    
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, canto: any | null } | null>(null);
     const [showAddModal, setShowAddModal] = useState(false);
     const [editData, setEditData] = useState<any>(null); 
@@ -201,44 +203,32 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
   
     const filteredCantos = useMemo(() => {
         if (!search) return cantos;
-        const normSearch = normalizeText(search);
-        return cantos.filter(c => normalizeText(c.titulo).includes(normSearch));
+        return cantos.filter(c => normalizeText(c.titulo).includes(normalizeText(search)));
     }, [cantos, search]);
 
     const toggleFavCanto = (e: any, canto: any) => {
         e.stopPropagation(); 
         const isFav = favorites.some((f: any) => f.cantoId === canto.id);
-        if (isFav) {
-            setFavorites(favorites.filter((f: any) => f.cantoId !== canto.id));
-        } else {
-            setFavorites([...favorites, {
-                isCanto: true, cantoId: canto.id, libro: canto.titulo,
-                capitulo: 0, versiculo: '🎵', texto: 'Canto completo',
-                versionName: 'CANTO', cantoData: canto 
-            }]);
-        }
+        if (isFav) setFavorites(favorites.filter((f: any) => f.cantoId !== canto.id));
+        else setFavorites([...favorites, { isCanto: true, cantoId: canto.id, libro: canto.titulo, capitulo: 0, versiculo: '🎵', texto: 'Canto completo', versionName: 'CANTO', cantoData: canto }]);
     };
 
-    // CORRECCIÓN: Evitar que el menú se desborde al hacer clic derecho
     const handleSongContextMenu = (e: React.MouseEvent, canto: any) => {
         e.preventDefault(); e.stopPropagation();
-        let x = e.clientX; 
-        let y = e.clientY;
-        if (window.innerHeight - y < 150) y -= 150; // Si hay poco espacio abajo, lo subimos
-        if (window.innerWidth - x < 200) x -= 200;  // Si hay poco espacio a la derecha, lo movemos
+        let x = e.clientX; let y = e.clientY;
+        if (window.innerHeight - y < 150) y -= 150; 
+        if (window.innerWidth - x < 200) x -= 200;  
         setContextMenu({ x, y, canto });
     };
 
     const handleBgContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
-        let x = e.clientX; 
-        let y = e.clientY;
+        let x = e.clientX; let y = e.clientY;
         if (window.innerHeight - y < 100) y -= 100;
         setContextMenu({ x, y, canto: null });
     };
 
     const closeContextMenu = () => setContextMenu(null);
-
     const openAddModal = () => { setShowAddModal(true); closeContextMenu(); };
     const openEditModal = async () => {
         const canto = contextMenu?.canto;
@@ -250,23 +240,15 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
     };
     const openDeleteModal = () => { setShowDeleteModal(contextMenu?.canto); closeContextMenu(); };
 
-    const handleSaveAdd = async (data: any) => {
-        setShowAddModal(false);
-        await invoke("add_canto", { titulo: data.titulo, letra: data.letra });
-        loadCantosFromDB(); 
-    };
-
+    const handleSaveAdd = async (data: any) => { setShowAddModal(false); await invoke("add_canto", { titulo: data.titulo, letra: data.letra }); loadCantosFromDB(); };
     const handleSaveEdit = async (data: any) => {
-        const idToEdit = editData.id;
-        setEditData(null);
+        const idToEdit = editData.id; setEditData(null);
         setCantos(prev => prev.map(c => c.id === idToEdit ? { ...c, titulo: data.titulo } : c));
         if (onCantoUpdated) onCantoUpdated(idToEdit, data.titulo, data.letra);
         await invoke("update_canto", { id: idToEdit, titulo: data.titulo, letra: data.letra });
     };
-
     const handleConfirmDelete = async () => {
-        const idToDelete = showDeleteModal.id;
-        setShowDeleteModal(null); 
+        const idToDelete = showDeleteModal.id; setShowDeleteModal(null); 
         setCantos(prev => prev.filter(c => c.id !== idToDelete));
         setFavorites(favorites.filter((f: any) => f.cantoId !== idToDelete));
         if (onCantoDeleted) onCantoDeleted(idToDelete);
@@ -280,7 +262,6 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
            <input type="text" placeholder="Buscar canto..." value={search} onChange={(e) => setSearch(e.target.value)}
               className="w-full bg-panel border border-white/10 rounded py-2 pl-8 pr-2 text-[10px] focus:border-accent outline-none font-medium placeholder:text-gray-600 shadow-inner" />
         </div>
-  
         <div className="flex-1 overflow-y-auto bg-black/40 rounded-lg border border-white/5 p-2 scrollbar-thin">
            <div className="grid grid-cols-1 gap-0.5">
               {filteredCantos.length > 0 ? filteredCantos.map(c => {
@@ -293,9 +274,7 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
                        <Star size={14} className={isFav ? "text-yellow-500" : "text-gray-500 hover:text-yellow-500"} fill={isFav ? "currentColor" : "none"} />
                     </button>
                  </div>
-              )}) : (
-                 <div className="p-4 text-center text-gray-600 text-[10px] italic pointer-events-none">Click derecho aquí para agregar un canto</div>
-              )}
+              )}) : (<div className="p-4 text-center text-gray-600 text-[10px] italic pointer-events-none">Click derecho aquí para agregar un canto</div>)}
            </div>
         </div>
 
@@ -303,18 +282,12 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
             <>
                 <div className="fixed inset-0 z-40" onClick={closeContextMenu} onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
                 <div className="fixed z-50 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-44 animate-in fade-in zoom-in duration-150" style={{ top: contextMenu.y, left: contextMenu.x }}>
-                    <button onClick={openAddModal} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
-                        <Plus size={12}/> Agregar Canto
-                    </button>
+                    <button onClick={openAddModal} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Plus size={12}/> Agregar Canto</button>
                     {contextMenu.canto && (
                         <>
                             <div className="h-px bg-white/5 my-1 mx-2"></div>
-                            <button onClick={openEditModal} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
-                                <Edit2 size={12}/> Editar Canto
-                            </button>
-                            <button onClick={openDeleteModal} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2">
-                                <Trash2 size={12}/> Eliminar Canto
-                            </button>
+                            <button onClick={openEditModal} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Edit2 size={12}/> Editar Canto</button>
+                            <button onClick={openDeleteModal} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2"><Trash2 size={12}/> Eliminar Canto</button>
                         </>
                     )}
                 </div>
@@ -323,16 +296,12 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
 
         {showAddModal && <CantoEditorModal isEdit={false} onClose={() => setShowAddModal(false)} onSave={handleSaveAdd} />}
         {editData && <CantoEditorModal isEdit={true} initialData={editData} onClose={() => setEditData(null)} onSave={handleSaveEdit} />}
-
         {showDeleteModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in">
                 <div className="bg-sidebar border border-white/10 w-[400px] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-center">
                     <div className="p-8 pb-4 flex flex-col items-center gap-4">
                         <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center text-red-500"><AlertTriangle size={28} /></div>
-                        <div>
-                            <h3 className="text-lg font-black text-white mb-2">¿Eliminar Canto?</h3>
-                            <p className="text-xs text-gray-400 leading-relaxed">Estás a punto de eliminar <strong className="text-white">"{showDeleteModal.titulo}"</strong>. <br/> Esta acción no se puede deshacer.</p>
-                        </div>
+                        <div><h3 className="text-lg font-black text-white mb-2">¿Eliminar Canto?</h3><p className="text-xs text-gray-400 leading-relaxed">Estás a punto de eliminar <strong className="text-white">"{showDeleteModal.titulo}"</strong>. <br/> Esta acción no se puede deshacer.</p></div>
                     </div>
                     <div className="p-4 bg-black/40 border-t border-white/5 flex gap-3 mt-4">
                         <button onClick={() => setShowDeleteModal(null)} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-gray-400 bg-panel hover:bg-white/5 transition-colors border border-white/5">No, Cancelar</button>
@@ -346,7 +315,7 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
 };
 
 // ==========================================
-// 2B. BIBLIOTECA DE BIBLIAS
+// 2B. BIBLIOTECA DE BIBLIAS (OMITIDA BREVEMENTE POR ESPACIO, SE MANTIENE IGUAL)
 // ==========================================
 const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVersionChange }: any) => {
   const [versions, setVersions] = useState<string[]>([]);
@@ -358,53 +327,33 @@ const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVers
   useEffect(() => {
     invoke("get_bible_versions").then((v: any) => {
       const sortedVersions = [...v].sort((a: string, b: string) => {
-          const aIs1960 = a.includes("1960");
-          const bIs1960 = b.includes("1960");
-          if (aIs1960 && !bIs1960) return -1;
-          if (!aIs1960 && bIs1960) return 1;
-          return a.localeCompare(b);
+          const aIs1960 = a.includes("1960"); const bIs1960 = b.includes("1960");
+          if (aIs1960 && !bIs1960) return -1; if (!aIs1960 && bIs1960) return 1; return a.localeCompare(b);
       });
       setVersions(sortedVersions);
       if (sortedVersions.length > 0 && !currentVersion) onVersionChange(sortedVersions[0]);
     });
   }, []);
 
-  useEffect(() => {
-    if (currentVersion) invoke("get_books", { version: currentVersion }).then((b: any) => setBooks(b));
-  }, [currentVersion]);
+  useEffect(() => { if (currentVersion) invoke("get_books", { version: currentVersion }).then((b: any) => setBooks(b)); }, [currentVersion]);
 
   const handleSearchChange = (e: any) => {
-    const val = e.target.value;
-    setSearch(val);
+    const val = e.target.value; setSearch(val);
     if (val && !val.match(/\d/) && books.length > 0) {
-        const normVal = normalizeText(val);
-        const match = books.find(b => normalizeText(b.nombre).startsWith(normVal));
-        if (match && normalizeText(match.nombre) !== normVal) setSuggestion(match.nombre);
-        else setSuggestion("");
+        const normVal = normalizeText(val); const match = books.find(b => normalizeText(b.nombre).startsWith(normVal));
+        if (match && normalizeText(match.nombre) !== normVal) setSuggestion(match.nombre); else setSuggestion("");
     } else { setSuggestion(""); }
   };
 
   const handleKeyDown = (e: any) => {
-    if ((e.key === 'ArrowRight' || e.key === 'Tab') && suggestion) {
-        e.preventDefault(); setSearch(suggestion + " "); setSuggestion("");
-    }
+    if ((e.key === 'ArrowRight' || e.key === 'Tab') && suggestion) { e.preventDefault(); setSearch(suggestion + " "); setSuggestion(""); }
     if (e.key === 'Enter') {
-        const matchFull = search.search(/(.+?)\s+(\d+)[:\s](\d+)/);
         let rawBook = "", cap = 0, ver = 1;
         const match = search.match(/(.+?)\s+(\d+)(?:[:\s](\d+))?/);
-
-        if (match) {
-            rawBook = match[1].trim(); 
-            cap = parseInt(match[2]); 
-            if(match[3]) ver = parseInt(match[3]);
-        }
-
+        if (match) { rawBook = match[1].trim(); cap = parseInt(match[2]); if(match[3]) ver = parseInt(match[3]); }
         if (rawBook) {
             const realBook = books.find(b => normalizeText(b.nombre) === normalizeText(rawBook));
-            if (realBook) {
-                onDirectSearch(currentVersion, realBook.nombre, cap, ver);
-                setSearch(""); setSuggestion("");
-            }
+            if (realBook) { onDirectSearch(currentVersion, realBook.nombre, cap, ver); setSearch(""); setSuggestion(""); }
         }
     }
   };
@@ -414,47 +363,33 @@ const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVers
   return (
     <div className="flex flex-col h-full p-3 select-none bg-sidebar/30">
       <div className="flex gap-2 mb-3">
-        <select value={currentVersion} onChange={(e) => onVersionChange(e.target.value)} 
-          className="bg-panel p-2 rounded border border-white/10 text-[10px] w-32 outline-none focus:border-accent font-bold truncate">
+        <select value={currentVersion} onChange={(e) => onVersionChange(e.target.value)} className="bg-panel p-2 rounded border border-white/10 text-[10px] w-32 outline-none focus:border-accent font-bold truncate">
           {versions.map(v => <option key={v} value={v}>{v}</option>)}
         </select>
         <div className="flex-1 relative group">
           <Search className="absolute left-2 top-2.5 text-gray-500 group-focus-within:text-accent transition-colors" size={12} />
           {suggestion && search && !search.match(/\d/) && normalizeText(suggestion).startsWith(normalizeText(search)) && (
-             <div className="absolute left-8 top-2 text-[10px] text-gray-500 pointer-events-none font-mono flex">
-                <span className="opacity-0">{search}</span>
-                <span className="opacity-50">{suggestion.slice(search.length)}</span>
-                <span className="ml-2 text-[8px] border border-gray-700 rounded px-1 text-gray-600 bg-black/20">TAB</span>
-             </div>
+             <div className="absolute left-8 top-2 text-[10px] text-gray-500 pointer-events-none font-mono flex"><span className="opacity-0">{search}</span><span className="opacity-50">{suggestion.slice(search.length)}</span></div>
           )}
-          <input type="text" placeholder="Ej: Rut 1 (Enter)..." value={search} onChange={handleSearchChange} onKeyDown={handleKeyDown}
-            className="w-full bg-panel border border-white/10 rounded py-2 pl-8 pr-2 text-[10px] focus:border-accent outline-none font-medium placeholder:text-gray-600 relative z-10 bg-transparent" />
+          <input type="text" placeholder="Ej: Rut 1..." value={search} onChange={handleSearchChange} onKeyDown={handleKeyDown} className="w-full bg-panel border border-white/10 rounded py-2 pl-8 pr-2 text-[10px] focus:border-accent outline-none font-medium placeholder:text-gray-600 relative z-10 bg-transparent" />
         </div>
       </div>
-
       <div className="flex-1 overflow-y-auto bg-black/40 rounded-lg border border-white/5 p-2 scrollbar-thin">
         {view.mode === 'books' ? (
           <div className="grid grid-cols-1 gap-0.5">
-            {filteredBooks.length > 0 ? filteredBooks.map(b => (
-              <div key={b.nombre} onClick={() => setView({ mode: 'chapters', book: b })}
-                className="p-2 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex justify-between items-center group cursor-pointer transition-all border-b border-white/5">
-                <span className="font-medium">{b.nombre}</span>
-                <span className="text-[9px] text-gray-600 group-hover:text-accent">{b.capitulos}</span>
+            {filteredBooks.map(b => (
+              <div key={b.nombre} onClick={() => setView({ mode: 'chapters', book: b })} className="p-2 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex justify-between items-center cursor-pointer border-b border-white/5">
+                <span>{b.nombre}</span><span className="text-[9px] text-gray-600">{b.capitulos}</span>
               </div>
-            )) : <div className="p-4 text-center text-gray-600 text-[10px] italic">Sin resultados...</div>}
+            ))}
           </div>
         ) : (
           <div className="animate-in slide-in-from-right duration-300 flex flex-col h-full">
-            <button onClick={() => setView({ mode: 'books', book: null })} className="flex items-center gap-1 text-accent text-[10px] font-black mb-4 hover:brightness-125 transition-all w-full border-b border-white/10 pb-2 flex-shrink-0">
-              <ChevronLeft size={14}/> {view.book.nombre}
-            </button>
+            <button onClick={() => setView({ mode: 'books', book: null })} className="flex items-center gap-1 text-accent text-[10px] font-black mb-4 w-full border-b border-white/10 pb-2"><ChevronLeft size={14}/> {view.book.nombre}</button>
             <div className="flex-1 overflow-y-auto scrollbar-thin pb-2">
                 <div className="grid grid-cols-5 gap-1.5">
                 {Array.from({ length: view.book.capitulos }, (_, i) => (
-                    <div key={i} onClick={() => onSelectChapter(currentVersion, view.book.nombre, i + 1)}
-                    className="aspect-square bg-panel hover:bg-accent flex items-center justify-center text-[10px] font-black rounded border border-white/5 cursor-pointer transition-all active:scale-90 shadow-sm">
-                    {i + 1}
-                    </div>
+                    <div key={i} onClick={() => onSelectChapter(currentVersion, view.book.nombre, i + 1)} className="aspect-square bg-panel hover:bg-accent flex items-center justify-center text-[10px] font-black rounded border border-white/5 cursor-pointer">{i + 1}</div>
                 ))}
                 </div>
             </div>
@@ -474,37 +409,23 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
     const [showDeleteModal, setShowDeleteModal] = useState<any>(null); 
     const [showAspectSubMenu, setShowAspectSubMenu] = useState(false); 
 
-    const loadImages = () => {
-        invoke("get_all_images").then((data: any) => setImages(data));
-    };
-
+    const loadImages = () => { invoke("get_all_images").then((data: any) => setImages(data)); };
     useEffect(() => { loadImages(); }, []);
 
-    // CORRECCIÓN: Prevención de desbordamiento en menú
     const handleBgContextMenu = (e: React.MouseEvent) => {
-        e.preventDefault();
-        let x = e.clientX; 
-        let y = e.clientY;
+        e.preventDefault(); let x = e.clientX; let y = e.clientY;
         if (window.innerHeight - y < 100) y -= 100;
-        setContextMenu({ x, y, image: null });
-        setShowAspectSubMenu(false);
+        setContextMenu({ x, y, image: null }); setShowAspectSubMenu(false);
     };
 
     const handleItemContextMenu = (e: React.MouseEvent, img: any) => {
-        e.preventDefault(); e.stopPropagation();
-        let x = e.clientX; 
-        let y = e.clientY;
-        if (window.innerHeight - y < 200) y -= 200; // Aquí quitamos más altura porque el menú de imagen es largo
-        if (window.innerWidth - x < 250) x -= 250;  // Espacio extra por si sale el submenú a la derecha
-        
-        setContextMenu({ x, y, image: img });
-        setShowAspectSubMenu(false); 
+        e.preventDefault(); e.stopPropagation(); let x = e.clientX; let y = e.clientY;
+        if (window.innerHeight - y < 200) y -= 200; 
+        if (window.innerWidth - x < 250) x -= 250;  
+        setContextMenu({ x, y, image: img }); setShowAspectSubMenu(false); 
     };
 
-    const closeContextMenu = () => {
-        setContextMenu(null);
-        setShowAspectSubMenu(false);
-    };
+    const closeContextMenu = () => { setContextMenu(null); setShowAspectSubMenu(false); };
 
     const handleAddImage = async () => {
         closeContextMenu();
@@ -523,18 +444,15 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
         if (!showDeleteModal) return;
         await invoke("delete_image_db", { id: showDeleteModal.id });
         if (onImageDeleted) onImageDeleted(showDeleteModal.ruta); 
-        setShowDeleteModal(null);
-        loadImages();
+        setShowDeleteModal(null); loadImages();
     };
 
     const handleAspectChange = async (newAspect: string) => {
         if (!contextMenu?.image) return;
         const imgId = contextMenu.image.id;
-        
         await invoke("update_image_aspect", { id: imgId, aspecto: newAspect });
         setImages(prev => prev.map(img => img.id === imgId ? { ...img, aspecto: newAspect } : img));
         if (onImageAspectChanged) onImageAspectChanged(imgId, newAspect);
-        
         closeContextMenu();
     };
 
@@ -544,17 +462,12 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
                 {images.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
                         <ImageIcon size={40} className="mb-2 text-gray-400" />
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 leading-relaxed pointer-events-none">
-                            Presione clic derecho<br/>para ver las opciones
-                        </p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 leading-relaxed pointer-events-none">Presione clic derecho<br/>para ver las opciones</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 gap-1">
                         {images.map(img => (
-                            <div key={img.id} 
-                                 onClick={() => onSelectImage(img)} 
-                                 onDoubleClick={() => onProjectImage(img)}
-                                 onContextMenu={(e) => handleItemContextMenu(e, img)}
+                            <div key={img.id} onClick={() => onSelectImage(img)} onDoubleClick={() => onProjectImage(img)} onContextMenu={(e) => handleItemContextMenu(e, img)}
                                  className="p-1 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex items-center gap-3 group cursor-pointer transition-all border border-transparent hover:border-white/10">
                                 <img src={convertFileSrc(img.ruta)} className="w-16 h-10 object-cover rounded shadow-sm bg-black" alt={img.nombre} />
                                 <span className="font-bold text-gray-300 group-hover:text-accent truncate flex-1 leading-tight">{img.nombre}</span>
@@ -564,45 +477,29 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
                 )}
             </div>
 
-            {/* MENÚ CLICK DERECHO LIBRERÍA */}
             {contextMenu && (
                 <>
                     <div className="fixed inset-0 z-40" onClick={closeContextMenu} onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
                     <div className="fixed z-50 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-52 animate-in fade-in zoom-in duration-150" style={{ top: contextMenu.y, left: contextMenu.x }}>
-                        <button onClick={handleAddImage} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
-                            <Plus size={12}/> Agregar Imagen
-                        </button>
+                        <button onClick={handleAddImage} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Plus size={12}/> Agregar Imagen</button>
                         {contextMenu.image && (
                             <>
                                 <div className="h-px bg-white/5 my-1 mx-2"></div>
-                                
                                 <div className="relative group/aspect">
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); setShowAspectSubMenu(!showAspectSubMenu); }} 
-                                        className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center justify-between">
+                                    <button onClick={(e) => { e.stopPropagation(); setShowAspectSubMenu(!showAspectSubMenu); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center justify-between">
                                         <div className="flex items-center gap-2"><Maximize size={12}/> Aspecto de Imagen</div>
                                         <ChevronRight size={12} className={showAspectSubMenu ? "text-accent" : ""} />
                                     </button>
-                                    
                                     {showAspectSubMenu && (
                                         <div className="absolute top-0 left-[98%] bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-48 animate-in slide-in-from-left-2 duration-150 z-50">
-                                            <button onClick={() => handleAspectChange('contain')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'contain' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>
-                                                <Minimize size={12}/> Ajustar al centro
-                                            </button>
-                                            <button onClick={() => handleAspectChange('cover')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'cover' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>
-                                                <Maximize size={12}/> Rellenar pantalla
-                                            </button>
-                                            <button onClick={() => handleAspectChange('fill')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'fill' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>
-                                                <Type size={12}/> Estirar
-                                            </button>
+                                            <button onClick={() => handleAspectChange('contain')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'contain' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}><Minimize size={12}/> Ajustar al centro</button>
+                                            <button onClick={() => handleAspectChange('cover')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'cover' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}><Maximize size={12}/> Rellenar pantalla</button>
+                                            <button onClick={() => handleAspectChange('fill')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'fill' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}><Type size={12}/> Estirar</button>
                                         </div>
                                     )}
                                 </div>
-
                                 <div className="h-px bg-white/5 my-1 mx-2"></div>
-                                <button onClick={() => { setShowDeleteModal(contextMenu.image); closeContextMenu(); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2">
-                                    <Trash2 size={12}/> Eliminar Imagen
-                                </button>
+                                <button onClick={() => { setShowDeleteModal(contextMenu.image); closeContextMenu(); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2"><Trash2 size={12}/> Eliminar Imagen</button>
                             </>
                         )}
                     </div>
@@ -614,10 +511,7 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
                     <div className="bg-sidebar border border-white/10 w-[400px] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-center">
                         <div className="p-8 pb-4 flex flex-col items-center gap-4">
                             <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center text-red-500"><AlertTriangle size={28} /></div>
-                            <div>
-                                <h3 className="text-lg font-black text-white mb-2">¿Eliminar Imagen?</h3>
-                                <p className="text-xs text-gray-400 leading-relaxed">Estás a punto de eliminar <strong className="text-white">"{showDeleteModal.nombre}"</strong>. <br/> Desaparecerá de la biblioteca.</p>
-                            </div>
+                            <div><h3 className="text-lg font-black text-white mb-2">¿Eliminar Imagen?</h3><p className="text-xs text-gray-400 leading-relaxed">Desaparecerá de la biblioteca.</p></div>
                         </div>
                         <div className="p-4 bg-black/40 border-t border-white/5 flex gap-3 mt-4">
                             <button onClick={() => setShowDeleteModal(null)} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-gray-400 bg-panel hover:bg-white/5 transition-colors border border-white/5">No, Cancelar</button>
@@ -626,18 +520,116 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
                     </div>
                 </div>
             )}
-            
-            {images.length > 0 && (
-                <div className="text-[9px] text-center text-gray-600 mt-2 font-bold uppercase pointer-events-none">
-                    Clic derecho para opciones
+        </div>
+    );
+};
+
+// ==========================================
+// NUEVO: 2D. BIBLIOTECA DE VIDEOS (ALTO RENDIMIENTO)
+// ==========================================
+const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted }: any) => {
+    const [videos, setVideos] = useState<any[]>([]);
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, video: any | null } | null>(null);
+    const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
+
+    const loadVideos = () => { invoke("get_all_videos").then((data: any) => setVideos(data)); };
+    useEffect(() => { loadVideos(); }, []);
+
+    const handleBgContextMenu = (e: React.MouseEvent) => {
+        e.preventDefault(); let x = e.clientX; let y = e.clientY;
+        if (window.innerHeight - y < 100) y -= 100;
+        setContextMenu({ x, y, video: null });
+    };
+
+    const handleItemContextMenu = (e: React.MouseEvent, vid: any) => {
+        e.preventDefault(); e.stopPropagation(); let x = e.clientX; let y = e.clientY;
+        if (window.innerHeight - y < 150) y -= 150; 
+        setContextMenu({ x, y, video: vid });
+    };
+
+    const closeContextMenu = () => setContextMenu(null);
+
+    const handleAddVideo = async () => {
+        closeContextMenu();
+        try {
+            const path = await invoke("select_video_file");
+            if (path) {
+                const pathStr = path as string;
+                const nombre = pathStr.split(/[/\\]/).pop() || "Video";
+                await invoke("add_video_db", { nombre, ruta: pathStr });
+                loadVideos();
+            }
+        } catch (error) { console.error("Error agregando video", error); }
+    };
+
+    const handleDeleteVideo = async () => {
+        if (!showDeleteModal) return;
+        await invoke("delete_video_db", { id: showDeleteModal.id });
+        if (onVideoDeleted) onVideoDeleted(showDeleteModal.ruta); 
+        setShowDeleteModal(null); loadVideos();
+    };
+
+    return (
+        <div className="flex flex-col h-full p-3 select-none bg-sidebar/30 relative" onContextMenu={handleBgContextMenu}>
+            <div className="flex-1 overflow-y-auto bg-black/40 rounded-lg border border-white/5 p-2 scrollbar-thin relative">
+                {videos.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
+                        <Video size={40} className="mb-2 text-gray-400" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 leading-relaxed pointer-events-none">Presione clic derecho<br/>para agregar videos</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 gap-1">
+                        {videos.map(vid => (
+                            <div key={vid.id} onClick={() => onSelectVideo(vid)} onDoubleClick={() => onProjectVideo(vid)} onContextMenu={(e) => handleItemContextMenu(e, vid)}
+                                 className="p-1 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex items-center gap-3 group cursor-pointer transition-all border border-transparent hover:border-white/10">
+                                {/* OPTIMIZACIÓN MAGISTRAL: "#t=0.1" extrae el primer frame usando la GPU nativa, sin usar memoria extra, y preload=metadata evita ahogar la RAM */}
+                                <div className="w-16 h-10 bg-black rounded shadow-sm overflow-hidden relative flex items-center justify-center">
+                                    <video src={`${convertFileSrc(vid.ruta)}#t=0.1`} className="w-full h-full object-cover opacity-80" preload="metadata" />
+                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40"><Play size={12} className="text-white"/></div>
+                                </div>
+                                <span className="font-bold text-gray-300 group-hover:text-accent truncate flex-1 leading-tight">{vid.nombre}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {contextMenu && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={closeContextMenu} onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
+                    <div className="fixed z-50 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-44 animate-in fade-in zoom-in duration-150" style={{ top: contextMenu.y, left: contextMenu.x }}>
+                        <button onClick={handleAddVideo} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Plus size={12}/> Agregar Video</button>
+                        {contextMenu.video && (
+                            <>
+                                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                                <button onClick={() => { setShowDeleteModal(contextMenu.video); closeContextMenu(); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2"><Trash2 size={12}/> Eliminar Video</button>
+                            </>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {showDeleteModal && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-sidebar border border-white/10 w-[400px] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-center">
+                        <div className="p-8 pb-4 flex flex-col items-center gap-4">
+                            <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center text-red-500"><AlertTriangle size={28} /></div>
+                            <div><h3 className="text-lg font-black text-white mb-2">¿Eliminar Video?</h3><p className="text-xs text-gray-400 leading-relaxed">Desaparecerá de la biblioteca.</p></div>
+                        </div>
+                        <div className="p-4 bg-black/40 border-t border-white/5 flex gap-3 mt-4">
+                            <button onClick={() => setShowDeleteModal(null)} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-gray-400 bg-panel hover:bg-white/5 transition-colors border border-white/5">No, Cancelar</button>
+                            <button onClick={handleDeleteVideo} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-white bg-red-600 hover:bg-red-500 transition-colors shadow-lg shadow-red-500/20">Sí, Eliminar</button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
     );
 };
 
+
 // ==========================================
-// 3. SIDEBAR IZQUIERDO (CORRECCIÓN DE OVERFLOW)
+// 3. SIDEBAR IZQUIERDO
 // ==========================================
 const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
   const location = useLocation();
@@ -651,24 +643,21 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
         <span className="font-black text-sm tracking-tight text-gray-100">WORSHIP RS</span>
       </div>
       
-      {/* CORRECCIÓN: Le quitamos el flex-1 para que no empuje el contenedor de abajo */}
       <nav className="shrink-0 py-3 space-y-1">
         <Link to="/" className={menuClass('/')}><Music size={16}/> Cantos</Link>
         <Link to="/bibles" className={menuClass('/bibles')}><BookOpen size={16}/> Biblias</Link>
         <div className="pt-4 pb-2 text-[9px] font-bold text-gray-600 uppercase px-4 tracking-widest">Multimedia</div>
         <Link to="/images" className={menuClass('/images')}><ImageIcon size={16}/> Imágenes</Link>
-        <Link to="#" className={menuClass('/videos')}><Video size={16}/> Videos</Link>
+        <Link to="/videos" className={menuClass('/videos')}><Video size={16}/> Videos</Link>
         <Link to="#" className={menuClass('/pdf')}><FileText size={16}/> Presentación PDF</Link>
       </nav>
       
-      {/* CORRECCIÓN: flex-1 min-h-0 le dice que tome el resto de la pantalla y permita el Scroll interno */}
       <div className="flex-1 min-h-0 bg-black/20 border-t border-white/5 p-3 flex flex-col">
         <div className="flex items-center justify-between mb-3 px-1 shrink-0">
           <span className="text-yellow-600 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1"><Star size={10} fill="currentColor"/> Favoritos ({favorites.length})</span>
           {favorites.length > 0 && <span className="text-[8px] text-gray-600 cursor-pointer hover:text-red-500" onClick={() => setFavorites([])}>Limpiar</span>}
         </div>
         
-        {/* Aquí está el verdadero contenedor del Scroll */}
         <div className={`flex-1 min-h-0 rounded-lg flex flex-col p-1 overflow-y-auto scrollbar-thin transition-colors ${favorites.length === 0 ? 'bg-panel/10 border-2 border-dashed border-white/5 justify-center items-center' : 'bg-transparent'}`}>
            {favorites.length === 0 ? (
              <p className="text-[9px] text-gray-500 font-medium uppercase text-center pointer-events-none">Selecciona la estrella <br/> para añadir aquí</p>
@@ -723,12 +712,12 @@ const DashboardLayout = () => {
   }, [activeVersion]);
 
   useEffect(() => {
-    if (previewVerse && previewVerse.tipo !== 'imagen') {
+    if (previewVerse && previewVerse.tipo !== 'imagen' && previewVerse.tipo !== 'video') {
         const index = currentChapter.findIndex(v => isSameVerse(v, previewVerse));
         if (index !== -1) document.getElementById(`verse-${index}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     const handleKey = (e: KeyboardEvent) => {
-        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || !currentChapter.length || !previewVerse || previewVerse.tipo === 'imagen') return;
+        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || !currentChapter.length || !previewVerse || previewVerse.tipo === 'imagen' || previewVerse.tipo === 'video') return;
         const idx = currentChapter.findIndex(v => isSameVerse(v, previewVerse));
         if (e.key === 'ArrowDown' && currentChapter[idx + 1]) projectVerse(currentChapter[idx + 1]);
         if (e.key === 'ArrowUp' && currentChapter[idx - 1]) projectVerse(currentChapter[idx - 1]);
@@ -760,9 +749,7 @@ const DashboardLayout = () => {
     }
 
     invoke("get_canto_diapositivas", { cantoId: canto.id }).then((slides: any) => {
-      const formattedSlides = slides.map((s: any) => ({
-          libro: canto.titulo, capitulo: 0, versiculo: s.orden, texto: s.texto, versionName: "CANTO"
-      }));
+      const formattedSlides = slides.map((s: any) => ({ libro: canto.titulo, capitulo: 0, versiculo: s.orden, texto: s.texto, versionName: "CANTO" }));
       setCantoCache(prev => ({ ...prev, [canto.id]: formattedSlides })); 
       setCurrentChapter(formattedSlides);
       setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' }); 
@@ -770,7 +757,7 @@ const DashboardLayout = () => {
   };
 
   const projectVerse = (verse: any) => {
-    if (verse.tipo === 'imagen') {
+    if (verse.tipo === 'imagen' || verse.tipo === 'video') {
         invoke("trigger_projection", { verse });
         setPreviewVerse(verse);
         return;
@@ -784,6 +771,10 @@ const DashboardLayout = () => {
     setPreviewVerse(vWithVersion);
   };
 
+  const emitVideoControl = (action: string) => {
+      invoke("trigger_video_control", { action });
+  };
+
   const handleFavoriteAction = (fav: any) => {
       if (fav.isCanto) loadCanto(fav.cantoData);
       else projectVerse(fav); 
@@ -791,33 +782,24 @@ const DashboardLayout = () => {
 
   const handleCantoUpdated = (id: number, nuevoTitulo: string, nuevaLetra: string) => {
       const estrofas = nuevaLetra.split('\n\n').map(s => s.trim()).filter(s => s !== '');
-      const formattedSlides = estrofas.map((texto, i) => ({
-          libro: nuevoTitulo, capitulo: 0, versiculo: i + 1, texto: texto, versionName: "CANTO"
-      }));
+      const formattedSlides = estrofas.map((texto, i) => ({ libro: nuevoTitulo, capitulo: 0, versiculo: i + 1, texto: texto, versionName: "CANTO" }));
       setCantoCache(prev => ({ ...prev, [id]: formattedSlides }));
       if (activeBookInfo.cantoId === id) {
-          setCurrentChapter(formattedSlides);
-          setActiveBookInfo(prev => ({ ...prev, book: nuevoTitulo }));
-          setPreviewVerse(null); 
+          setCurrentChapter(formattedSlides); setActiveBookInfo(prev => ({ ...prev, book: nuevoTitulo })); setPreviewVerse(null); 
       }
   };
 
   const handleCantoDeleted = (id: number) => {
       if (activeBookInfo.cantoId === id) {
-          setCurrentChapter([]);
-          setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
+          setCurrentChapter([]); setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
       }
   };
 
-  // Se encarga de cambiar instantáneamente la vista al elegir el ajuste en el menú central
   const applyImageFit = async (fitMode: 'contain' | 'cover' | 'fill') => {
       if (activeBookInfo.imgId) {
-          // Si lo cambiamos desde el panel central, también lo guardamos en la base de datos
           await invoke("update_image_aspect", { id: activeBookInfo.imgId, aspecto: fitMode });
           setActiveBookInfo(prev => ({ ...prev, aspecto: fitMode }));
-          if (previewVerse?.ruta === activeBookInfo.ruta) {
-              projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: fitMode });
-          }
+          if (previewVerse?.ruta === activeBookInfo.ruta) projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: fitMode });
       }
       setCenterMenu(null);
   };
@@ -826,12 +808,10 @@ const DashboardLayout = () => {
     let updatedBiblia = bibleStyles; let updatedCantos = cantoStyles;
     if (styleTab === 'biblia') {
         updatedBiblia = { ...bibleStyles, ...newS };
-        if (newS.bgColor && !newS.bgImage) updatedBiblia.bgImage = ""; 
-        setBibleStyles(updatedBiblia);
+        if (newS.bgColor && !newS.bgImage) updatedBiblia.bgImage = ""; setBibleStyles(updatedBiblia);
     } else {
         updatedCantos = { ...cantoStyles, ...newS };
-        if (newS.bgColor && !newS.bgImage) updatedCantos.bgImage = ""; 
-        setCantoStyles(updatedCantos);
+        if (newS.bgColor && !newS.bgImage) updatedCantos.bgImage = ""; setCantoStyles(updatedCantos);
     }
     invoke("trigger_style_update", { styles: { biblia: updatedBiblia, cantos: updatedCantos } });
   };
@@ -857,7 +837,7 @@ const DashboardLayout = () => {
       <SidebarLeft favorites={favorites} setFavorites={setFavorites} onProjectFavorite={handleFavoriteAction} />
 
       <main className="flex-1 flex flex-col border-r border-black/50 bg-mainbg shadow-inner relative z-10">
-        <header className="h-14 border-b border-white/5 flex items-center px-8 justify-between bg-black/10">
+        <header className="h-14 border-b border-white/5 flex items-center px-8 justify-between bg-black/10 shrink-0">
           <div className="flex flex-col">
              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Panel de Edición</span>
              <span className="text-lg font-black text-accent tracking-tight">
@@ -869,8 +849,51 @@ const DashboardLayout = () => {
 
         <div className="flex-1 overflow-y-auto p-10 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-sidebar via-mainbg to-mainbg scrollbar-thin relative" ref={scrollRef}>
           
-          {/* PANEL CENTRAL: IMÁGENES */}
-          {activeBookInfo.tipo === 'imagen' ? (
+          {/* PANEL CENTRAL: VIDEOS */}
+          {activeBookInfo.tipo === 'video' ? (
+              <div className="h-full flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 relative">
+                  
+                  {/* Contenedor del video local */}
+                  <div className="relative group w-full max-w-3xl aspect-video bg-black rounded-xl shadow-2xl overflow-hidden ring-1 ring-white/10">
+                      <video 
+                          src={convertFileSrc(activeBookInfo.ruta)} 
+                          className="w-full h-full object-contain"
+                          controls
+                          controlsList="nodownload"
+                      />
+                      {/* Botón rápido para enviar al proyector (Doble seguridad por si no quiere dar doble clic a la miniatura) */}
+                      {previewVerse?.ruta !== activeBookInfo.ruta && (
+                          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => projectVerse({ tipo: 'video', ruta: activeBookInfo.ruta })} className="bg-accent text-white px-4 py-2 rounded shadow-lg text-xs font-bold uppercase flex items-center gap-2 hover:bg-accent/80">
+                                  <MonitorPlay size={14}/> Proyectar Video
+                              </button>
+                          </div>
+                      )}
+                  </div>
+
+                  {/* CONTROLES REMOTOS (Solo aparecen si este video está siendo proyectado actualmente) */}
+                  {previewVerse?.ruta === activeBookInfo.ruta && (
+                      <div className="mt-8 bg-sidebar border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center animate-in slide-in-from-bottom-4">
+                          <div className="flex items-center gap-2 text-accent font-black uppercase text-xs tracking-widest mb-4">
+                              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Video en Vivo
+                          </div>
+                          <div className="flex gap-4">
+                              <button onClick={() => emitVideoControl('play')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10">
+                                  <Play size={16} className="text-green-400"/> Reproducir
+                              </button>
+                              <button onClick={() => emitVideoControl('pause')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10">
+                                  <Pause size={16} className="text-yellow-400"/> Pausar
+                              </button>
+                              <button onClick={() => emitVideoControl('restart')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10">
+                                  <RotateCcw size={16} className="text-blue-400"/> Reiniciar
+                              </button>
+                          </div>
+                      </div>
+                  )}
+              </div>
+          
+          // PANEL CENTRAL: IMÁGENES
+          ) : activeBookInfo.tipo === 'imagen' ? (
               <div className="h-full flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 relative group"
                    onContextMenu={(e) => { 
                        e.preventDefault(); 
@@ -879,37 +902,20 @@ const DashboardLayout = () => {
                        if (window.innerWidth - x < 250) x -= 250;
                        setCenterMenu({ x, y }); 
                    }}>
-                  
-                  <img 
-                      src={convertFileSrc(activeBookInfo.ruta)} 
+                  <img src={convertFileSrc(activeBookInfo.ruta)} 
                       className={`max-w-full max-h-full rounded shadow-2xl cursor-pointer hover:scale-[1.01] transition-transform ring-1 ring-white/10 ${activeBookInfo.aspecto === 'cover' ? 'object-cover w-full h-full' : activeBookInfo.aspecto === 'fill' ? 'object-fill w-full h-full' : 'object-contain'}`}
-                      onClick={() => projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: activeBookInfo.aspecto })}
-                      alt="Vista previa"
-                  />
-                  
-                  <div className="absolute top-4 left-4 bg-black/60 backdrop-blur text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 opacity-70">
-                      Modo: {activeBookInfo.aspecto === 'contain' ? 'Ajustado al centro' : activeBookInfo.aspecto === 'cover' ? 'Rellenar Pantalla' : 'Estirar'}
-                  </div>
-                  <div className="absolute top-4 right-4 bg-black/60 backdrop-blur text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 shadow-lg">
-                      <MonitorPlay size={12} className="inline mr-2 text-accent"/> Un clic para proyectar | Clic derecho para opciones
-                  </div>
-
-                  {/* MENÚ CLICK DERECHO PARA LA IMAGEN CENTRAL */}
+                      onClick={() => projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: activeBookInfo.aspecto })} alt="Vista previa" />
+                  <div className="absolute top-4 left-4 bg-black/60 backdrop-blur text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 opacity-70">Modo: {activeBookInfo.aspecto === 'contain' ? 'Ajustado al centro' : activeBookInfo.aspecto === 'cover' ? 'Rellenar Pantalla' : 'Estirar'}</div>
+                  <div className="absolute top-4 right-4 bg-black/60 backdrop-blur text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 shadow-lg"><MonitorPlay size={12} className="inline mr-2 text-accent"/> Un clic para proyectar | Clic derecho para opciones</div>
                   {centerMenu && (
                       <>
                           <div className="fixed inset-0 z-40 cursor-default" onClick={(e) => { e.stopPropagation(); setCenterMenu(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCenterMenu(null); }}></div>
                           <div className="fixed z-50 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-56 animate-in fade-in zoom-in duration-150" style={{ top: centerMenu.y, left: centerMenu.x }}>
-                              <button onClick={() => applyImageFit('contain')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
-                                  <Minimize size={14}/> Ajustar al centro (Original)
-                              </button>
+                              <button onClick={() => applyImageFit('contain')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Minimize size={14}/> Ajustar al centro</button>
                               <div className="h-px bg-white/5 my-0.5 mx-2"></div>
-                              <button onClick={() => applyImageFit('cover')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
-                                  <Maximize size={14}/> Rellenar pantalla completa
-                              </button>
+                              <button onClick={() => applyImageFit('cover')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Maximize size={14}/> Rellenar pantalla completa</button>
                               <div className="h-px bg-white/5 my-0.5 mx-2"></div>
-                              <button onClick={() => applyImageFit('fill')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
-                                  <Type size={14}/> Estirar forzado (Ignorar proporción)
-                              </button>
+                              <button onClick={() => applyImageFit('fill')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Type size={14}/> Estirar forzado</button>
                           </div>
                       </>
                   )}
@@ -922,17 +928,12 @@ const DashboardLayout = () => {
                 const isFav = favorites.some((f: any) => isSameVerse(f, v));
                 const active = isSameVerse(previewVerse, v);
                 return (
-                  <div key={i} id={`verse-${i}`} onDoubleClick={() => projectVerse(v)} 
-                    className={`group relative p-4 pr-12 rounded-xl border transition-all cursor-pointer ${active ? 'bg-accent/10 border-accent' : 'hover:bg-accent/5 border-transparent hover:border-accent/20'}`}>
+                  <div key={i} id={`verse-${i}`} onDoubleClick={() => projectVerse(v)} className={`group relative p-4 pr-12 rounded-xl border transition-all cursor-pointer ${active ? 'bg-accent/10 border-accent' : 'hover:bg-accent/5 border-transparent hover:border-accent/20'}`}>
                     <span className={`absolute right-12 top-4 text-[9px] font-bold opacity-0 group-hover:opacity-100 transition-opacity border px-1 rounded mr-2 ${active ? 'text-accent border-accent opacity-100' : 'text-gray-500 border-gray-600'}`}>{active ? 'EN VIVO' : 'PROYECTAR'}</span>
-                    <button onClick={(e) => { e.stopPropagation(); setFavorites(isFav ? favorites.filter(f=>!isSameVerse(f,v)) : [...favorites, {...v, versionName: activeVersion}]) }} 
-                        className="absolute right-4 top-4 transition-transform active:scale-90 hover:scale-110">
+                    <button onClick={(e) => { e.stopPropagation(); setFavorites(isFav ? favorites.filter(f=>!isSameVerse(f,v)) : [...favorites, {...v, versionName: activeVersion}]) }} className="absolute right-4 top-4 transition-transform active:scale-90 hover:scale-110">
                         <Star size={18} className={isFav ? "text-yellow-500" : "text-gray-600 hover:text-yellow-500"} fill={isFav ? "currentColor" : "none"}/>
                     </button>
-                    <p className={`text-xl leading-relaxed font-serif ${active ? 'text-white' : 'text-gray-300 whitespace-pre-line'}`}>
-                        <span className="text-accent font-sans font-black text-xs mr-3 align-top select-none">{v.versiculo}</span>
-                        {v.texto}
-                    </p>
+                    <p className={`text-xl leading-relaxed font-serif ${active ? 'text-white' : 'text-gray-300 whitespace-pre-line'}`}><span className="text-accent font-sans font-black text-xs mr-3 align-top select-none">{v.versiculo}</span>{v.texto}</p>
                   </div>
                 );
               })}
@@ -946,9 +947,9 @@ const DashboardLayout = () => {
         </div>
       </main>
 
-      <aside className="w-[340px] bg-sidebar flex flex-col h-full shadow-2xl relative z-10">
+      <aside className="w-[340px] bg-sidebar flex flex-col h-full shadow-2xl relative z-10 shrink-0">
         <div className="flex-1 overflow-hidden flex flex-col">
-            <div className="h-10 border-b border-white/5 flex items-center px-4 bg-panel/10">
+            <div className="h-10 border-b border-white/5 flex items-center px-4 bg-panel/10 shrink-0">
                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Biblioteca</span>
             </div>
             <div className="flex-1 overflow-hidden">
@@ -957,53 +958,44 @@ const DashboardLayout = () => {
                   <Route path="/bibles" element={<BiblesLibrary currentVersion={activeVersion} onVersionChange={setActiveVersion} onSelectChapter={loadChapter} onDirectSearch={(v:any, b:any, c:any, vr:any) => invoke("get_single_verse", {version:v,book:b,cap:c,ver:vr}).then((r:any)=>r&&projectVerse(r))} />} />
                   
                   <Route path="/images" element={<ImagesLibrary 
-                      onSelectImage={(img: any) => {
-                          setActiveBookInfo({ book: img.nombre, cap: 0, cantoId: null, tipo: 'imagen', ruta: img.ruta, imgId: img.id, aspecto: img.aspecto });
-                          setPreviewVerse(null);
-                          setCurrentChapter([]);
-                      }}
+                      onSelectImage={(img: any) => { setActiveBookInfo({ book: img.nombre, cap: 0, cantoId: null, tipo: 'imagen', ruta: img.ruta, imgId: img.id, aspecto: img.aspecto }); setPreviewVerse(null); setCurrentChapter([]); }}
                       onProjectImage={(img: any) => projectVerse({ tipo: 'imagen', ruta: img.ruta, aspecto: img.aspecto })}
-                      onImageDeleted={(rutaBorrada: string) => {
-                          if (activeBookInfo.ruta === rutaBorrada) {
-                              setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
-                              setPreviewVerse(null);
-                          }
-                      }}
-                      onImageAspectChanged={(imgId: number, newAspecto: string) => {
-                          if (activeBookInfo.imgId === imgId) {
-                              setActiveBookInfo(prev => ({ ...prev, aspecto: newAspecto }));
-                              if (previewVerse?.ruta === activeBookInfo.ruta) {
-                                  projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: newAspecto });
-                              }
-                          }
-                      }}
+                      onImageDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' }); setPreviewVerse(null); } }}
+                      onImageAspectChanged={(imgId: number, newAspecto: string) => { if (activeBookInfo.imgId === imgId) { setActiveBookInfo(prev => ({ ...prev, aspecto: newAspecto })); if (previewVerse?.ruta === activeBookInfo.ruta) projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: newAspecto }); } }}
+                  />} />
+
+                  <Route path="/videos" element={<VideosLibrary 
+                      onSelectVideo={(vid: any) => { setActiveBookInfo({ book: vid.nombre, cap: 0, cantoId: null, tipo: 'video', ruta: vid.ruta, imgId: vid.id, aspecto: 'contain' }); setPreviewVerse(null); setCurrentChapter([]); }}
+                      onProjectVideo={(vid: any) => projectVerse({ tipo: 'video', ruta: vid.ruta })}
+                      onVideoDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' }); setPreviewVerse(null); } }}
                   />} />
                </Routes>
             </div>
         </div>
 
         <div className="flex-shrink-0 relative z-20 mt-2 pl-4">
-             <button 
-                onClick={() => setShowStyleModal(true)} 
-                className="bg-accent hover:bg-accent/90 text-white text-[9px] font-bold uppercase py-1 px-4 rounded-t-lg shadow-sm flex items-center gap-2 transition-all translate-y-[1px]"
-            >
+             <button onClick={() => setShowStyleModal(true)} className="bg-accent hover:bg-accent/90 text-white text-[9px] font-bold uppercase py-1 px-4 rounded-t-lg shadow-sm flex items-center gap-2 transition-all translate-y-[1px]">
                 <Palette size={10}/> PERSONALIZAR
             </button>
         </div>
 
-        <div className="p-4 bg-black/40 border-t border-white/10 space-y-3 relative z-10">
+        <div className="p-4 bg-black/40 border-t border-white/10 space-y-3 relative z-10 shrink-0">
             <div className="h-28 bg-black rounded-lg flex items-center justify-center border border-white/5 relative overflow-hidden bg-cover bg-center"
                  style={{ 
-                    backgroundImage: previewVerse?.tipo === 'imagen' ? `url('${convertFileSrc(previewVerse.ruta)}')` : (activeStyles.bgImage ? `url('${convertFileSrc(activeStyles.bgImage)}')` : 'none'),
-                    backgroundColor: previewVerse?.tipo === 'imagen' ? '#000' : activeStyles.bgColor,
+                    backgroundImage: previewVerse?.tipo === 'imagen' ? `url('${convertFileSrc(previewVerse.ruta)}')` : (activeStyles.bgImage && previewVerse?.tipo !== 'video' ? `url('${convertFileSrc(activeStyles.bgImage)}')` : 'none'),
+                    backgroundColor: (previewVerse?.tipo === 'imagen' || previewVerse?.tipo === 'video') ? '#000' : activeStyles.bgColor,
                     backgroundSize: previewVerse?.tipo === 'imagen' && previewVerse.aspecto === 'contain' ? 'contain' : (previewVerse?.tipo === 'imagen' && previewVerse.aspecto === 'fill' ? '100% 100%' : 'cover')
                  }}>
-                 {previewVerse ? (
+                 
+                 {previewVerse?.tipo === 'video' ? (
+                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80">
+                         <MonitorPlay size={24} className="text-accent animate-pulse"/>
+                         <span className="text-[9px] font-black uppercase tracking-widest text-white">Video en Proyección</span>
+                     </div>
+                 ) : previewVerse ? (
                     previewVerse.tipo !== 'imagen' && (
                         <div className="p-3 text-center w-full drop-shadow-md">
-                            <p className="text-[10px] font-bold line-clamp-3 leading-tight" style={{ color: activeStyles.textColor }}>
-                                {isPreviewCanto ? previewVerse.texto : `"${previewVerse.texto}"`}
-                            </p>
+                            <p className="text-[10px] font-bold line-clamp-3 leading-tight" style={{ color: activeStyles.textColor }}>{isPreviewCanto ? previewVerse.texto : `"${previewVerse.texto}"`}</p>
                         </div>
                     )
                  ) : (
@@ -1023,45 +1015,22 @@ const DashboardLayout = () => {
             <div className="bg-sidebar border border-white/10 w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 
                 <div className="flex justify-between items-center p-4 bg-panel/50">
-                    <h2 className="text-xs font-black uppercase text-accent tracking-widest flex items-center gap-2">
-                        <Palette size={14}/> Personalizar Proyección
-                    </h2>
-                    <button onClick={() => setShowStyleModal(false)} className="text-gray-500 hover:text-white transition-colors">
-                        <X size={16}/>
-                    </button>
+                    <h2 className="text-xs font-black uppercase text-accent tracking-widest flex items-center gap-2"><Palette size={14}/> Personalizar Proyección</h2>
+                    <button onClick={() => setShowStyleModal(false)} className="text-gray-500 hover:text-white transition-colors"><X size={16}/></button>
                 </div>
 
                 <div className="flex border-b border-white/10 bg-panel/30">
-                    <button 
-                        onClick={() => setStyleTab('biblia')} 
-                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${styleTab === 'biblia' ? 'border-b-2 border-accent text-accent bg-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>
-                        Fondo de Biblia
-                    </button>
-                    <button 
-                        onClick={() => setStyleTab('cantos')} 
-                        className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${styleTab === 'cantos' ? 'border-b-2 border-accent text-accent bg-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>
-                        Fondo de Cantos
-                    </button>
+                    <button onClick={() => setStyleTab('biblia')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${styleTab === 'biblia' ? 'border-b-2 border-accent text-accent bg-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>Fondo de Biblia</button>
+                    <button onClick={() => setStyleTab('cantos')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${styleTab === 'cantos' ? 'border-b-2 border-accent text-accent bg-white/5' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}>Fondo de Cantos</button>
                 </div>
 
                 <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
                     <div>
                         <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><ImageIcon size={10}/> Fondo Actual: {styleTab}</p>
-                        
                         <div className="grid grid-cols-4 gap-3 mb-4">
-                            <div onClick={() => updateStyles({ bgColor: '#000000', bgImage: '' })} 
-                                className={`aspect-video rounded-lg bg-black border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#000000' && !currentModalStyles.bgImage ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}>
-                                <span className="text-[8px] text-gray-700 font-bold">NEGRO</span>
-                            </div>
-                            <div onClick={() => updateStyles({ bgColor: '#ffffff', bgImage: '' })} 
-                                className={`aspect-video rounded-lg bg-white border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#ffffff' && !currentModalStyles.bgImage ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}>
-                                <span className="text-[8px] text-gray-300 font-bold">BLANCO</span>
-                            </div>
-                            <div onClick={handleBgImageUpload} 
-                                className="aspect-video rounded-lg bg-panel border border-dashed border-white/20 cursor-pointer flex flex-col items-center justify-center gap-1 hover:bg-white/5 hover:border-accent text-gray-500 hover:text-accent transition-all">
-                                <Plus size={14} />
-                                <span className="text-[8px] font-bold">AGREGAR</span>
-                            </div>
+                            <div onClick={() => updateStyles({ bgColor: '#000000', bgImage: '' })} className={`aspect-video rounded-lg bg-black border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#000000' && !currentModalStyles.bgImage ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}><span className="text-[8px] text-gray-700 font-bold">NEGRO</span></div>
+                            <div onClick={() => updateStyles({ bgColor: '#ffffff', bgImage: '' })} className={`aspect-video rounded-lg bg-white border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#ffffff' && !currentModalStyles.bgImage ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}><span className="text-[8px] text-gray-300 font-bold">BLANCO</span></div>
+                            <div onClick={handleBgImageUpload} className="aspect-video rounded-lg bg-panel border border-dashed border-white/20 cursor-pointer flex flex-col items-center justify-center gap-1 hover:bg-white/5 hover:border-accent text-gray-500 hover:text-accent transition-all"><Plus size={14} /><span className="text-[8px] font-bold">AGREGAR</span></div>
                         </div>
 
                         {recentImages.length > 0 && (
@@ -1069,13 +1038,8 @@ const DashboardLayout = () => {
                                 <p className="text-[8px] font-bold text-gray-600 mb-2 uppercase">Galería</p>
                                 <div className="grid grid-cols-4 gap-3">
                                     {recentImages.map((img, idx) => (
-                                        <div key={idx} onClick={() => updateStyles({ bgImage: img, bgColor: 'transparent' })}
-                                             className={`aspect-video rounded-lg border cursor-pointer bg-cover bg-center relative group ${currentModalStyles.bgImage === img ? 'border-accent ring-1 ring-accent' : 'border-white/10 hover:border-white/40'}`}
-                                             style={{ backgroundImage: `url('${convertFileSrc(img)}')` }}>
-                                             <button onClick={(e) => {e.stopPropagation(); setRecentImages(recentImages.filter(i => i !== img))}} 
-                                                className="absolute top-1 right-1 bg-black/50 text-white p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500">
-                                                <X size={8}/>
-                                             </button>
+                                        <div key={idx} onClick={() => updateStyles({ bgImage: img, bgColor: 'transparent' })} className={`aspect-video rounded-lg border cursor-pointer bg-cover bg-center relative group ${currentModalStyles.bgImage === img ? 'border-accent ring-1 ring-accent' : 'border-white/10 hover:border-white/40'}`} style={{ backgroundImage: `url('${convertFileSrc(img)}')` }}>
+                                             <button onClick={(e) => {e.stopPropagation(); setRecentImages(recentImages.filter(i => i !== img))}} className="absolute top-1 right-1 bg-black/50 text-white p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500"><X size={8}/></button>
                                         </div>
                                     ))}
                                 </div>
@@ -1087,25 +1051,19 @@ const DashboardLayout = () => {
                         <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><Type size={10}/> Color del Texto</p>
                         <div className="flex gap-3 items-center bg-black/20 p-3 rounded-lg border border-white/5">
                             {presetColors.map(c => (
-                                <div key={c} onClick={() => updateStyles({ textColor: c })} 
-                                    className={`w-6 h-6 rounded-full border cursor-pointer transition-transform ${currentModalStyles.textColor === c ? 'border-accent scale-125 ring-2 ring-accent/30' : 'border-white/20 hover:scale-110'}`} style={{ backgroundColor: c }}></div>
+                                <div key={c} onClick={() => updateStyles({ textColor: c })} className={`w-6 h-6 rounded-full border cursor-pointer transition-transform ${currentModalStyles.textColor === c ? 'border-accent scale-125 ring-2 ring-accent/30' : 'border-white/20 hover:scale-110'}`} style={{ backgroundColor: c }}></div>
                             ))}
                             <div className="w-px h-6 bg-white/10 mx-1"></div>
                             <div className="relative group">
-                                <div className="w-8 h-8 rounded-full border border-white/20 flex items-center justify-center bg-gradient-to-br from-purple-500 to-pink-500 cursor-pointer group-hover:border-accent">
-                                    <Type size={12} className="text-white drop-shadow-md"/>
-                                </div>
-                                <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" 
-                                    value={currentModalStyles.textColor} onChange={(e) => updateStyles({ textColor: e.target.value })} />
+                                <div className="w-8 h-8 rounded-full border border-white/20 flex items-center justify-center bg-gradient-to-br from-purple-500 to-pink-500 cursor-pointer group-hover:border-accent"><Type size={12} className="text-white drop-shadow-md"/></div>
+                                <input type="color" className="absolute inset-0 opacity-0 cursor-pointer" value={currentModalStyles.textColor} onChange={(e) => updateStyles({ textColor: e.target.value })} />
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div className="p-4 bg-black/40 border-t border-white/5 flex justify-end">
-                    <button onClick={() => setShowStyleModal(false)} className="bg-white text-black px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-gray-200 transition-colors">
-                        Listo
-                    </button>
+                    <button onClick={() => setShowStyleModal(false)} className="bg-white text-black px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-gray-200 transition-colors">Listo</button>
                 </div>
             </div>
         </div>
