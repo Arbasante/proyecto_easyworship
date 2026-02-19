@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
 import { Music, BookOpen, Image, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, Settings, Trash2, Palette, X, Plus, Minus, Edit2, AlertTriangle, Type } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -22,7 +22,7 @@ const isSameVerse = (v1: any, v2: any) => {
 };
 
 // ==========================================
-// 1. VISTA DEL PROYECTOR
+// 1. VISTA DEL PROYECTOR (CON AUTO-ESCALADO INTELIGENTE)
 // ==========================================
 const ProjectorView = () => {
   const [liveVerse, setLiveVerse] = useState<any>(null);
@@ -30,7 +30,10 @@ const ProjectorView = () => {
   const [fontSize, setFontSize] = useState(100);
   const [opacity, setOpacity] = useState(0);
   
-  // AHORA EL PROYECTOR GUARDA AMBOS ESTILOS
+  // Referencias para medir el tamaño de la pantalla y el texto en tiempo real
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLParagraphElement>(null);
+
   const [styles, setStyles] = useState({ 
       biblia: { bgColor: '#000000', textColor: '#ffffff', bgImage: '' },
       cantos: { bgColor: '#000000', textColor: '#ffffff', bgImage: '' }
@@ -42,28 +45,49 @@ const ProjectorView = () => {
     return () => { un1.then(f => f()); un2.then(f => f()); };
   }, []);
 
+  // 1. Cuando llega una nueva canción/versículo, la ocultamos y la preparamos
   useEffect(() => {
     if (!liveVerse) return;
     setOpacity(0);
     const timeout = setTimeout(() => {
-        const length = liveVerse.texto.length;
-        
-        let newSize = 90;
-        if (length < 20) newSize = 140;
-        else if (length < 50) newSize = 110;
-        else if (length < 100) newSize = 85;
-        else if (length < 180) newSize = 65;
-        else if (length < 300) newSize = 45;
-        else newSize = 35;
-
-        setFontSize(newSize);
         setDisplayVerse(liveVerse);
-        requestAnimationFrame(() => setOpacity(1));
     }, 250);
     return () => clearTimeout(timeout);
   }, [liveVerse]);
 
-  // SELECCIONA EL ESTILO CORRECTO SEGÚN LO QUE SE ESTÉ PROYECTANDO
+  // 2. EL ALGORITMO MAGICO: Ajusta el texto al tamaño perfecto
+  useLayoutEffect(() => {
+    if (!displayVerse || !containerRef.current || !textRef.current) return;
+
+    const container = containerRef.current;
+    const text = textRef.current;
+
+    let min = 20;  // El texto más pequeño posible
+    let max = 300; // El texto más gigante posible (puedes subirlo si quieres)
+    let best = 20;
+
+    // Búsqueda binaria para encontrar el tamaño perfecto en milisegundos
+    while (min <= max) {
+        const mid = Math.floor((min + max) / 2);
+        text.style.fontSize = `${mid}px`;
+
+        // Preguntamos: "¿Cabe en la caja sin desbordarse?"
+        if (text.scrollHeight <= container.clientHeight && text.scrollWidth <= container.clientWidth) {
+            best = mid;     // Sí cabe, guardamos este tamaño
+            min = mid + 1;  // Intentemos hacerlo aún más grande
+        } else {
+            max = mid - 1;  // No cabe, lo hacemos más pequeño
+        }
+    }
+
+    // Le restamos 2px por seguridad, lo guardamos y revelamos el texto
+    const finalSize = best - 2;
+    setFontSize(finalSize);
+    text.style.fontSize = `${finalSize}px`; // Aplicamos el final
+
+    requestAnimationFrame(() => setOpacity(1));
+  }, [displayVerse]);
+
   const isCanto = displayVerse?.capitulo === 0;
   const currentStyle = isCanto ? styles.cantos : styles.biblia;
 
@@ -82,18 +106,22 @@ const ProjectorView = () => {
   }
 
   return (
-    <div 
-        className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden bg-cover bg-center transition-all duration-500"
-        style={containerStyle}
-    >
+    <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden bg-cover bg-center transition-all duration-500" style={containerStyle}>
       {displayVerse && (
-        <div className="w-full h-full flex flex-col justify-center transition-opacity duration-300 px-16 py-12" style={{ opacity }}>
-          <div className="flex-1 flex items-center justify-center w-full h-full">
-            <p style={{ fontSize: `${fontSize}px`, lineHeight: 1.3 }} className="font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line drop-shadow-md">
+        <div className="w-full h-full flex flex-col justify-between transition-opacity duration-300 px-8 py-8" style={{ opacity }}>
+          
+          {/* EL CONTENEDOR DE MEDICIÓN (El "corralito") */}
+          <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
+            <p 
+                ref={textRef} 
+                style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} 
+                className="font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line drop-shadow-md"
+            >
                 {isCanto ? displayVerse.texto : `"${displayVerse.texto}"`}
             </p>
           </div>
           
+          {/* REFERENCIA BÍBLICA (Oculta en Cantos) */}
           {!isCanto && (
             <div className="flex justify-end mt-4 shrink-0">
                <div className="border-r-8 pr-4" style={{ borderColor: currentStyle.textColor === '#ffffff' ? '#3b82f6' : currentStyle.textColor }}>
