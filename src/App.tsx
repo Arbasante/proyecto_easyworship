@@ -508,7 +508,7 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
 };
 
 // ==========================================
-// 4. DASHBOARD PRINCIPAL
+// 4. DASHBOARD PRINCIPAL (CON SISTEMA DE CACHÉ)
 // ==========================================
 const DashboardLayout = () => {
   const [currentChapter, setCurrentChapter] = useState<any[]>([]);
@@ -518,11 +518,13 @@ const DashboardLayout = () => {
   const [favorites, setFavorites] = useState<any[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null); 
 
-  // ESTADOS SEPARADOS PARA BIBLIA Y CANTOS
+  // --- SISTEMA DE CACHÉ EN MEMORIA ---
+  const [chapterCache, setChapterCache] = useState<Record<string, any[]>>({});
+  const [cantoCache, setCantoCache] = useState<Record<number, any[]>>({});
+
   const [bibleStyles, setBibleStyles] = useState({ bgColor: '#000000', textColor: '#ffffff', bgImage: '' });
   const [cantoStyles, setCantoStyles] = useState({ bgColor: '#000000', textColor: '#ffffff', bgImage: '' });
   
-  // ESTADO PARA LA PESTAÑA DEL MODAL DE ESTILOS
   const [styleTab, setStyleTab] = useState<'biblia' | 'cantos'>('biblia');
   const [showStyleModal, setShowStyleModal] = useState(false);
   const [recentImages, setRecentImages] = useState<string[]>([]);
@@ -550,13 +552,31 @@ const DashboardLayout = () => {
   }, [previewVerse, currentChapter]);
 
   const loadChapter = (version: string, book: string, cap: number) => {
+    const cacheKey = `${version}-${book}-${cap}`;
+    
+    // Si ya lo pedimos antes, lo cargamos instantáneamente de la RAM
+    if (chapterCache[cacheKey]) {
+        setCurrentChapter(chapterCache[cacheKey]);
+        setActiveBookInfo({ book, cap });
+        return;
+    }
+
+    // Si no está en caché, le preguntamos a Rust (quien ahora tiene una conexión súper rápida)
     invoke("get_chapter_verses", { version, book, cap }).then((verses: any) => {
+      setChapterCache(prev => ({ ...prev, [cacheKey]: verses })); // Guardar en caché
       setCurrentChapter(verses);
       setActiveBookInfo({ book, cap });
     });
   };
 
   const loadCanto = (canto: any) => {
+    // Revisar Caché de cantos
+    if (cantoCache[canto.id]) {
+        setCurrentChapter(cantoCache[canto.id]);
+        setActiveBookInfo({ book: canto.titulo, cap: 0 });
+        return;
+    }
+
     invoke("get_canto_diapositivas", { cantoId: canto.id }).then((slides: any) => {
       const formattedSlides = slides.map((s: any) => ({
           libro: canto.titulo,
@@ -565,6 +585,7 @@ const DashboardLayout = () => {
           texto: s.texto,
           versionName: "CANTO"
       }));
+      setCantoCache(prev => ({ ...prev, [canto.id]: formattedSlides })); // Guardar en caché
       setCurrentChapter(formattedSlides);
       setActiveBookInfo({ book: canto.titulo, cap: 0 }); 
     }).catch(err => {
@@ -589,7 +610,6 @@ const DashboardLayout = () => {
       }
   };
 
-  // FUNCIÓN ACTUALIZADA PARA MANEJAR ESTILOS SEPARADOS
   const updateStyles = (newS: any) => {
     let updatedBiblia = bibleStyles;
     let updatedCantos = cantoStyles;
@@ -604,7 +624,6 @@ const DashboardLayout = () => {
         setCantoStyles(updatedCantos);
     }
 
-    // Enviamos ambos objetos al backend
     invoke("trigger_style_update", { styles: { biblia: updatedBiblia, cantos: updatedCantos } });
   };
 
@@ -621,7 +640,6 @@ const DashboardLayout = () => {
     }
   };
 
-  // Determinar qué estilo mostrar en el panel de control según lo seleccionado
   const isPreviewCanto = previewVerse?.capitulo === 0;
   const activeStyles = isPreviewCanto ? cantoStyles : bibleStyles;
   const currentModalStyles = styleTab === 'biblia' ? bibleStyles : cantoStyles;
@@ -696,7 +714,6 @@ const DashboardLayout = () => {
         </div>
 
         <div className="p-4 bg-black/40 border-t border-white/10 space-y-3 relative z-10">
-            {/* Monitor Preview con los estilos correctos (Biblia vs Cantos) */}
             <div className="h-28 bg-black rounded-lg flex items-center justify-center border border-white/5 relative overflow-hidden bg-cover bg-center"
                  style={{ 
                     backgroundImage: activeStyles.bgImage ? `url('${convertFileSrc(activeStyles.bgImage)}')` : 'none',
@@ -719,7 +736,6 @@ const DashboardLayout = () => {
         </div>
       </aside>
 
-      {/* --- VENTANA FLOTANTE DE ESTILOS (ACTUALIZADA CON PESTAÑAS) --- */}
       {showStyleModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-sidebar border border-white/10 w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -733,7 +749,6 @@ const DashboardLayout = () => {
                     </button>
                 </div>
 
-                {/* PESTAÑAS DE NAVEGACIÓN */}
                 <div className="flex border-b border-white/10 bg-panel/30">
                     <button 
                         onClick={() => setStyleTab('biblia')} 

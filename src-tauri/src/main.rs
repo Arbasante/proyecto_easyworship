@@ -2,9 +2,10 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Mutex;
+use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
-// --- ESTRUCTURAS BIBLIA ---
+// --- ESTRUCTURAS ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct Verse {
     libro: String,
@@ -19,7 +20,6 @@ struct BookInfo {
     capitulos: i32,
 }
 
-// --- ESTRUCTURAS CANTOS ---
 #[derive(Serialize)]
 struct Canto {
     id: i32,
@@ -35,14 +35,22 @@ struct Diapositiva {
     texto: String,
 }
 
+// --- ESTADO GLOBAL (CONCURRENCIA Y CACHÉ DB) ---
+// Usamos Mutex para permitir accesos concurrentes seguros desde múltiples hilos de Tauri
+struct AppState {
+    cantos_db: Mutex<Connection>,
+    biblias_db: Mutex<Connection>,
+}
+
 // ==========================================
-// COMANDOS DE CANTOS (NUEVOS: CRUD)
+// COMANDOS DE CANTOS
 // ==========================================
 
 #[tauri::command]
-fn get_all_cantos() -> Vec<Canto> {
-    let conn = Connection::open("cantos.db").expect("DB no encontrada");
-    let mut stmt = conn.prepare("SELECT id, titulo, COALESCE(tono, ''), COALESCE(categoria, '') FROM cantos ORDER BY titulo").unwrap();
+fn get_all_cantos(state: State<AppState>) -> Result<Vec<Canto>, String> {
+    let conn = state.cantos_db.lock().map_err(|_| "Error de concurrencia")?;
+    let mut stmt = conn.prepare("SELECT id, titulo, COALESCE(tono, ''), COALESCE(categoria, '') FROM cantos ORDER BY titulo").map_err(|e| e.to_string())?;
+    
     let iter = stmt.query_map([], |row| {
         Ok(Canto {
             id: row.get(0)?,
@@ -50,14 +58,16 @@ fn get_all_cantos() -> Vec<Canto> {
             tono: row.get(2)?,
             categoria: row.get(3)?,
         })
-    }).unwrap();
-    iter.map(|c| c.unwrap()).collect()
+    }).map_err(|e| e.to_string())?;
+    
+    Ok(iter.filter_map(Result::ok).collect())
 }
 
 #[tauri::command]
-fn get_canto_diapositivas(canto_id: i32) -> Vec<Diapositiva> {
-    let conn = Connection::open("cantos.db").expect("DB no encontrada");
+fn get_canto_diapositivas(canto_id: i32, state: State<AppState>) -> Result<Vec<Diapositiva>, String> {
+    let conn = state.cantos_db.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, orden, texto FROM diapositivas WHERE canto_id = ? ORDER BY orden").unwrap();
+    
     let iter = stmt.query_map(params![canto_id], |row| {
         Ok(Diapositiva {
             id: row.get(0)?,
@@ -65,14 +75,13 @@ fn get_canto_diapositivas(canto_id: i32) -> Vec<Diapositiva> {
             texto: row.get(2)?,
         })
     }).unwrap();
-    iter.map(|d| d.unwrap()).collect()
+    
+    Ok(iter.filter_map(Result::ok).collect())
 }
 
 #[tauri::command]
-fn add_canto(titulo: String, letra: String) -> Result<(), String> {
-    let conn = Connection::open("cantos.db").map_err(|e| e.to_string())?;
-    
-    // 1. Inserta el canto
+fn add_canto(titulo: String, letra: String, state: State<AppState>) -> Result<(), String> {
+    let conn = state.cantos_db.lock().unwrap();
     conn.execute(
         "INSERT INTO cantos (titulo, tono, categoria) VALUES (?, '', 'Personalizado')",
         params![titulo],
@@ -80,7 +89,6 @@ fn add_canto(titulo: String, letra: String) -> Result<(), String> {
     
     let canto_id = conn.last_insert_rowid();
 
-    // 2. Divide la letra por doble salto de línea y guarda las diapositivas
     let estrofas: Vec<&str> = letra.split("\n\n").collect();
     let mut orden = 1;
     for estrofa in estrofas {
@@ -97,18 +105,11 @@ fn add_canto(titulo: String, letra: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn update_canto(id: i32, titulo: String, letra: String) -> Result<(), String> {
-    let conn = Connection::open("cantos.db").map_err(|e| e.to_string())?;
-    
-    // 1. Actualiza el título
-    conn.execute("UPDATE cantos SET titulo = ? WHERE id = ?", params![titulo, id])
-        .map_err(|e| e.to_string())?;
+fn update_canto(id: i32, titulo: String, letra: String, state: State<AppState>) -> Result<(), String> {
+    let conn = state.cantos_db.lock().unwrap();
+    conn.execute("UPDATE cantos SET titulo = ? WHERE id = ?", params![titulo, id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", params![id]).map_err(|e| e.to_string())?;
 
-    // 2. Borra las diapositivas viejas
-    conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", params![id])
-        .map_err(|e| e.to_string())?;
-
-    // 3. Inserta las nuevas diapositivas
     let estrofas: Vec<&str> = letra.split("\n\n").collect();
     let mut orden = 1;
     for estrofa in estrofas {
@@ -125,17 +126,12 @@ fn update_canto(id: i32, titulo: String, letra: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_canto(id: i32) -> Result<(), String> {
-    let conn = Connection::open("cantos.db").map_err(|e| e.to_string())?;
-    // Primero borramos sus diapositivas
-    conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", params![id])
-        .map_err(|e| e.to_string())?;
-    // Luego borramos el canto
-    conn.execute("DELETE FROM cantos WHERE id = ?", params![id])
-        .map_err(|e| e.to_string())?;
+fn delete_canto(id: i32, state: State<AppState>) -> Result<(), String> {
+    let conn = state.cantos_db.lock().unwrap();
+    conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", params![id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM cantos WHERE id = ?", params![id]).map_err(|e| e.to_string())?;
     Ok(())
 }
-
 
 // ==========================================
 // COMANDOS BIBLIA Y GENERALES
@@ -160,42 +156,44 @@ fn trigger_style_update(app: tauri::AppHandle, styles: serde_json::Value) {
 }
 
 #[tauri::command]
-fn get_bible_versions() -> Vec<String> {
-    let conn = Connection::open("biblias.db").expect("DB no encontrada");
+fn get_bible_versions(state: State<AppState>) -> Result<Vec<String>, String> {
+    let conn = state.biblias_db.lock().unwrap();
     let mut stmt = conn.prepare("SELECT nombre FROM versiones").unwrap();
-    let version_iter = stmt.query_map([], |row| row.get(0)).unwrap();
-    version_iter.map(|v| v.unwrap()).collect()
+    let iter = stmt.query_map([], |row| row.get(0)).unwrap();
+    Ok(iter.filter_map(Result::ok).collect())
 }
 
 #[tauri::command]
-fn get_books(version: String) -> Vec<BookInfo> {
-    let conn = Connection::open("biblias.db").expect("DB no encontrada");
+fn get_books(version: String, state: State<AppState>) -> Result<Vec<BookInfo>, String> {
+    let conn = state.biblias_db.lock().unwrap();
     let mut stmt = conn
         .prepare("SELECT libro_nombre, MAX(capitulo) FROM versiculos v JOIN versiones ver ON v.version_id = ver.id WHERE ver.nombre = ? GROUP BY libro_nombre ORDER BY libro_numero")
         .unwrap();
 
-    let book_iter = stmt.query_map(params![version], |row| {
+    let iter = stmt.query_map(params![version], |row| {
         Ok(BookInfo { nombre: row.get(0)?, capitulos: row.get(1)? })
     }).unwrap();
-    book_iter.map(|b| b.unwrap()).collect()
+    
+    Ok(iter.filter_map(Result::ok).collect())
 }
 
 #[tauri::command]
-fn get_chapter_verses(version: String, book: String, cap: i32) -> Vec<Verse> {
-    let conn = Connection::open("biblias.db").expect("DB no encontrada");
+fn get_chapter_verses(version: String, book: String, cap: i32, state: State<AppState>) -> Result<Vec<Verse>, String> {
+    let conn = state.biblias_db.lock().unwrap();
     let mut stmt = conn
         .prepare("SELECT libro_nombre, capitulo, versiculo, texto FROM versiculos v JOIN versiones ver ON v.version_id = ver.id WHERE ver.nombre = ? AND libro_nombre = ? AND capitulo = ? ORDER BY versiculo")
         .unwrap();
 
-    let v_iter = stmt.query_map(params![version, book, cap], |row| {
+    let iter = stmt.query_map(params![version, book, cap], |row| {
         Ok(Verse { libro: row.get(0)?, capitulo: row.get(1)?, versiculo: row.get(2)?, texto: row.get(3)? })
     }).unwrap();
-    v_iter.map(|v| v.unwrap()).collect()
+    
+    Ok(iter.filter_map(Result::ok).collect())
 }
 
 #[tauri::command]
-fn get_single_verse(version: String, book: String, cap: i32, ver: i32) -> Option<Verse> {
-    let conn = Connection::open("biblias.db").ok()?;
+fn get_single_verse(version: String, book: String, cap: i32, ver: i32, state: State<AppState>) -> Option<Verse> {
+    let conn = state.biblias_db.lock().ok()?;
     conn.query_row(
         "SELECT libro_nombre, capitulo, versiculo, texto FROM versiculos v JOIN versiones ver ON v.version_id = ver.id WHERE ver.nombre = ? AND libro_nombre = ? AND capitulo = ? AND versiculo = ?",
         params![version, book, cap, ver],
@@ -230,11 +228,33 @@ async fn open_projector(app: tauri::AppHandle) {
     }
 }
 
+// Función auxiliar para optimizar la DB al cargar
+fn setup_db(db_name: &str) -> Connection {
+    let conn = Connection::open(db_name).expect(&format!("No se pudo abrir {}", db_name));
+    // Optimizaciones bestiales de SQLite para lectura rápida
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL; 
+         PRAGMA synchronous = NORMAL; 
+         PRAGMA cache_size = -64000; 
+         PRAGMA temp_store = MEMORY;"
+    ).unwrap();
+    conn
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init()) 
+        .setup(|app| {
+            // Inicializamos las conexiones UNA SOLA VEZ y optimizadas
+            let app_state = AppState {
+                cantos_db: Mutex::new(setup_db("cantos.db")),
+                biblias_db: Mutex::new(setup_db("biblias.db")),
+            };
+            app.manage(app_state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_projector,
             get_bible_versions,
@@ -246,9 +266,9 @@ fn main() {
             trigger_style_update,
             get_all_cantos,
             get_canto_diapositivas,
-            add_canto,            // <--- NUEVO
-            update_canto,         // <--- NUEVO
-            delete_canto          // <--- NUEVO
+            add_canto,
+            update_canto,
+            delete_canto
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
