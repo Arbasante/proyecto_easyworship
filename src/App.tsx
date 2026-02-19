@@ -62,18 +62,16 @@ const ProjectorView = () => {
     return () => clearTimeout(timeout);
   }, [liveVerse]);
 
-  // Construcción del estilo con comillas de seguridad para rutas con espacios
   const containerStyle: any = {
-    backgroundColor: styles.bgColor,
-    color: styles.textColor,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat'
+      backgroundColor: styles.bgColor,
+      color: styles.textColor,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat'
   };
 
   if (styles.bgImage) {
-      const assetUrl = convertFileSrc(styles.bgImage);
-      containerStyle.backgroundImage = `url('${assetUrl}')`;
+      containerStyle.backgroundImage = `url('${convertFileSrc(styles.bgImage)}')`;
   } else {
       containerStyle.backgroundImage = 'none';
   }
@@ -104,7 +102,7 @@ const ProjectorView = () => {
 };
 
 // ==========================================
-// 2. BIBLIOTECA
+// 2. BIBLIOTECA (ACTUALIZADO: RVR 1960 POR DEFECTO)
 // ==========================================
 const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVersionChange }: any) => {
   const [versions, setVersions] = useState<string[]>([]);
@@ -115,8 +113,21 @@ const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVers
 
   useEffect(() => {
     invoke("get_bible_versions").then((v: any) => {
-      setVersions(v);
-      if (v.length > 0 && !currentVersion) onVersionChange(v[0]);
+      // ORDENAMOS LAS VERSIONES: "1960" de primera, el resto alfabéticamente
+      const sortedVersions = [...v].sort((a: string, b: string) => {
+          const aIs1960 = a.includes("1960");
+          const bIs1960 = b.includes("1960");
+          if (aIs1960 && !bIs1960) return -1;
+          if (!aIs1960 && bIs1960) return 1;
+          return a.localeCompare(b);
+      });
+
+      setVersions(sortedVersions);
+      
+      // Seleccionamos la primera por defecto (que ahora será la 1960 si existe)
+      if (sortedVersions.length > 0 && !currentVersion) {
+          onVersionChange(sortedVersions[0]);
+      }
     });
   }, []);
 
@@ -325,7 +336,6 @@ const DashboardLayout = () => {
     try {
         const path = await invoke("select_background_image");
         if (path) {
-            console.log("Imagen seleccionada:", path); // DEBUG
             const pStr = path as string;
             if (!recentImages.includes(pStr)) setRecentImages([...recentImages, pStr]);
             updateStyles({ bgImage: pStr, bgColor: 'transparent' });
@@ -392,7 +402,6 @@ const DashboardLayout = () => {
             </div>
         </div>
 
-        {/* --- PESTAÑA PERSONALIZAR --- */}
         <div className="flex-shrink-0 relative z-20 mt-2 pl-4">
              <button 
                 onClick={() => setShowStyleModal(true)} 
@@ -403,7 +412,6 @@ const DashboardLayout = () => {
         </div>
 
         <div className="p-4 bg-black/40 border-t border-white/10 space-y-3 relative z-10">
-            {/* Monitor Preview */}
             <div className="h-28 bg-black rounded-lg flex items-center justify-center border border-white/5 relative overflow-hidden bg-cover bg-center"
                  style={{ 
                     backgroundImage: projStyles.bgImage ? `url('${convertFileSrc(projStyles.bgImage)}')` : 'none',
@@ -439,7 +447,6 @@ const DashboardLayout = () => {
                 </div>
 
                 <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
-                    {/* Sección Fondo */}
                     <div>
                         <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><Image size={10}/> Fondo de Pantalla</p>
                         
@@ -459,7 +466,6 @@ const DashboardLayout = () => {
                             </div>
                         </div>
 
-                        {/* Galería */}
                         {recentImages.length > 0 && (
                             <div>
                                 <p className="text-[8px] font-bold text-gray-600 mb-2 uppercase">Galería</p>
@@ -479,7 +485,6 @@ const DashboardLayout = () => {
                         )}
                     </div>
 
-                    {/* Sección Texto */}
                     <div>
                         <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><Type size={10}/> Color del Texto</p>
                         <div className="flex gap-3 items-center bg-black/20 p-3 rounded-lg border border-white/5">
