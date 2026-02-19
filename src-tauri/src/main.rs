@@ -20,7 +20,7 @@ struct BookInfo {
 
 // --- COMANDOS DE BASE DE DATOS ---
 // (Estos no cambian, pero deben estar presentes)
-use std::path::PathBuf;
+
 
 #[tauri::command]
 async fn select_background_image(app: tauri::AppHandle) -> Option<String> {
@@ -36,10 +36,19 @@ async fn select_background_image(app: tauri::AppHandle) -> Option<String> {
     file_path.map(|path| path.to_string())
 }
 
+// REEMPLAZA LA ANTIGUA FUNCIÓN trigger_style_update POR ESTA:
+
 #[tauri::command]
 fn trigger_style_update(app: tauri::AppHandle, styles: serde_json::Value) {
-    // Reenvía los estilos a todas las ventanas (especialmente al proyector)
-    let _ = app.emit("update-styles", styles);
+    println!(">>> BACKEND: Enviando estilos: {:?}", styles); // Log para depurar
+
+    // Buscamos específicamente la ventana "projector"
+    if let Some(projector_window) = app.get_webview_window("projector") {
+        // Le enviamos el evento directamente a ella
+        let _ = projector_window.emit("update-styles", &styles);
+    } else {
+        println!(">>> ERROR: No se encontró la ventana del proyector para actualizar estilos");
+    }
 }
 
 #[tauri::command]
