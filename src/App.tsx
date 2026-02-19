@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
-import { Music, BookOpen, Image, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, Settings, Trash2, Palette, X, Plus, Minus, Edit2, AlertTriangle, Type } from "lucide-react";
+import { Music, BookOpen, Image as ImageIcon, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, ChevronRight, Settings, Trash2, Palette, X, Plus, Edit2, AlertTriangle, Type, Maximize, Minimize } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -16,13 +16,12 @@ const getShortVersion = (versionName: string) => {
 
 const isSameVerse = (v1: any, v2: any) => {
     if (!v1 || !v2) return false;
-    return v1.libro === v2.libro && 
-           v1.capitulo === v2.capitulo && 
-           v1.versiculo === v2.versiculo;
+    if (v1.tipo === 'imagen' || v2.tipo === 'imagen') return v1.ruta === v2.ruta;
+    return v1.libro === v2.libro && v1.capitulo === v2.capitulo && v1.versiculo === v2.versiculo;
 };
 
 // ==========================================
-// 1. VISTA DEL PROYECTOR (CON AUTO-ESCALADO INTELIGENTE)
+// 1. VISTA DEL PROYECTOR 
 // ==========================================
 const ProjectorView = () => {
   const [liveVerse, setLiveVerse] = useState<any>(null);
@@ -30,7 +29,6 @@ const ProjectorView = () => {
   const [fontSize, setFontSize] = useState(100);
   const [opacity, setOpacity] = useState(0);
   
-  // Referencias para medir el tamaño de la pantalla y el texto en tiempo real
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
 
@@ -45,7 +43,6 @@ const ProjectorView = () => {
     return () => { un1.then(f => f()); un2.then(f => f()); };
   }, []);
 
-  // 1. Cuando llega una nueva canción/versículo, la ocultamos y la preparamos
   useEffect(() => {
     if (!liveVerse) return;
     setOpacity(0);
@@ -55,51 +52,64 @@ const ProjectorView = () => {
     return () => clearTimeout(timeout);
   }, [liveVerse]);
 
-  // 2. EL ALGORITMO MAGICO: Ajusta el texto al tamaño perfecto
   useLayoutEffect(() => {
-    if (!displayVerse || !containerRef.current || !textRef.current) return;
+    if (!displayVerse || displayVerse.tipo === 'imagen' || !containerRef.current || !textRef.current) {
+        if (displayVerse?.tipo === 'imagen') requestAnimationFrame(() => setOpacity(1));
+        return;
+    }
 
     const container = containerRef.current;
     const text = textRef.current;
 
-    let min = 20;  // El texto más pequeño posible
-    let max = 300; // El texto más gigante posible (puedes subirlo si quieres)
+    let min = 20;  
+    let max = 300; 
     let best = 20;
 
-    // Búsqueda binaria para encontrar el tamaño perfecto en milisegundos
     while (min <= max) {
         const mid = Math.floor((min + max) / 2);
         text.style.fontSize = `${mid}px`;
 
-        // Preguntamos: "¿Cabe en la caja sin desbordarse?"
         if (text.scrollHeight <= container.clientHeight && text.scrollWidth <= container.clientWidth) {
-            best = mid;     // Sí cabe, guardamos este tamaño
-            min = mid + 1;  // Intentemos hacerlo aún más grande
+            best = mid;     
+            min = mid + 1;  
         } else {
-            max = mid - 1;  // No cabe, lo hacemos más pequeño
+            max = mid - 1;  
         }
     }
 
-    // Le restamos 2px por seguridad, lo guardamos y revelamos el texto
     const finalSize = best - 2;
     setFontSize(finalSize);
-    text.style.fontSize = `${finalSize}px`; // Aplicamos el final
+    text.style.fontSize = `${finalSize}px`;
 
     requestAnimationFrame(() => setOpacity(1));
   }, [displayVerse]);
+
+  if (displayVerse?.tipo === 'imagen') {
+      const fitClass = displayVerse.aspecto === 'cover' 
+            ? 'w-full h-full object-cover'   
+            : displayVerse.aspecto === 'fill' 
+            ? 'w-full h-full object-fill'    
+            : 'max-w-full max-h-full object-contain'; 
+            
+      return (
+          <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
+              <img src={convertFileSrc(displayVerse.ruta)} className={fitClass} />
+          </div>
+      );
+  }
 
   const isCanto = displayVerse?.capitulo === 0;
   const currentStyle = isCanto ? styles.cantos : styles.biblia;
 
   const containerStyle: any = {
-      backgroundColor: currentStyle.bgColor,
-      color: currentStyle.textColor,
+      backgroundColor: currentStyle?.bgColor || '#000',
+      color: currentStyle?.textColor || '#fff',
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat'
   };
 
-  if (currentStyle.bgImage) {
+  if (currentStyle?.bgImage) {
       containerStyle.backgroundImage = `url('${convertFileSrc(currentStyle.bgImage)}')`;
   } else {
       containerStyle.backgroundImage = 'none';
@@ -109,8 +119,6 @@ const ProjectorView = () => {
     <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden bg-cover bg-center transition-all duration-500" style={containerStyle}>
       {displayVerse && (
         <div className="w-full h-full flex flex-col justify-between transition-opacity duration-300 px-8 py-8" style={{ opacity }}>
-          
-          {/* EL CONTENEDOR DE MEDICIÓN (El "corralito") */}
           <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
             <p 
                 ref={textRef} 
@@ -120,8 +128,6 @@ const ProjectorView = () => {
                 {isCanto ? displayVerse.texto : `"${displayVerse.texto}"`}
             </p>
           </div>
-          
-          {/* REFERENCIA BÍBLICA (Oculta en Cantos) */}
           {!isCanto && (
             <div className="flex justify-end mt-4 shrink-0">
                <div className="border-r-8 pr-4" style={{ borderColor: currentStyle.textColor === '#ffffff' ? '#3b82f6' : currentStyle.textColor }}>
@@ -138,8 +144,7 @@ const ProjectorView = () => {
 };
 
 // ==========================================
-// NUEVO: COMPONENTE AISLADO PARA EL EDITOR
-// (Garantiza 0 lag al teclear)
+// EDITOR DE CANTOS
 // ==========================================
 const CantoEditorModal = ({ isEdit, initialData, onClose, onSave }: any) => {
     const [formData, setFormData] = useState(initialData || { titulo: '', letra: '' });
@@ -180,7 +185,7 @@ const CantoEditorModal = ({ isEdit, initialData, onClose, onSave }: any) => {
 };
 
 // ==========================================
-// 2A. BIBLIOTECA DE CANTOS (ÓPTIMA)
+// 2A. BIBLIOTECA DE CANTOS
 // ==========================================
 const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated, onCantoDeleted }: any) => {
     const [cantos, setCantos] = useState<any[]>([]);
@@ -191,13 +196,9 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
     const [editData, setEditData] = useState<any>(null); 
     const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
   
-    const loadCantosFromDB = () => {
-        invoke("get_all_cantos").then((data: any) => setCantos(data));
-    };
-
+    const loadCantosFromDB = () => { invoke("get_all_cantos").then((data: any) => setCantos(data)); };
     useEffect(() => { loadCantosFromDB(); }, []);
   
-    // Evita volver a buscar si no cambia la lista o el texto
     const filteredCantos = useMemo(() => {
         if (!search) return cantos;
         const normSearch = normalizeText(search);
@@ -218,23 +219,27 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
         }
     };
 
+    // CORRECCIÓN: Evitar que el menú se desborde al hacer clic derecho
     const handleSongContextMenu = (e: React.MouseEvent, canto: any) => {
         e.preventDefault(); e.stopPropagation();
-        setContextMenu({ x: e.clientX, y: e.clientY, canto });
+        let x = e.clientX; 
+        let y = e.clientY;
+        if (window.innerHeight - y < 150) y -= 150; // Si hay poco espacio abajo, lo subimos
+        if (window.innerWidth - x < 200) x -= 200;  // Si hay poco espacio a la derecha, lo movemos
+        setContextMenu({ x, y, canto });
     };
 
     const handleBgContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
-        setContextMenu({ x: e.clientX, y: e.clientY, canto: null });
+        let x = e.clientX; 
+        let y = e.clientY;
+        if (window.innerHeight - y < 100) y -= 100;
+        setContextMenu({ x, y, canto: null });
     };
 
     const closeContextMenu = () => setContextMenu(null);
 
-    const openAddModal = () => {
-        setShowAddModal(true);
-        closeContextMenu();
-    };
-
+    const openAddModal = () => { setShowAddModal(true); closeContextMenu(); };
     const openEditModal = async () => {
         const canto = contextMenu?.canto;
         closeContextMenu();
@@ -243,13 +248,8 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
         const letraCompleta = slides.map((s: any) => s.texto).join('\n\n');
         setEditData({ id: canto.id, titulo: canto.titulo, letra: letraCompleta });
     };
+    const openDeleteModal = () => { setShowDeleteModal(contextMenu?.canto); closeContextMenu(); };
 
-    const openDeleteModal = () => {
-        setShowDeleteModal(contextMenu?.canto);
-        closeContextMenu();
-    };
-
-    // --- ACCIONES OPTIMIZADAS ---
     const handleSaveAdd = async (data: any) => {
         setShowAddModal(false);
         await invoke("add_canto", { titulo: data.titulo, letra: data.letra });
@@ -258,32 +258,23 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
 
     const handleSaveEdit = async (data: any) => {
         const idToEdit = editData.id;
-        setEditData(null); // 1. Cierra modal en 0ms
-
-        // 2. Actualización Optimista Local
+        setEditData(null);
         setCantos(prev => prev.map(c => c.id === idToEdit ? { ...c, titulo: data.titulo } : c));
-
-        // 3. Modifica Caché y Vista Central en 0ms
         if (onCantoUpdated) onCantoUpdated(idToEdit, data.titulo, data.letra);
-
-        // 4. Escribe en Base de datos silenciosamente
         await invoke("update_canto", { id: idToEdit, titulo: data.titulo, letra: data.letra });
     };
 
     const handleConfirmDelete = async () => {
         const idToDelete = showDeleteModal.id;
         setShowDeleteModal(null); 
-
         setCantos(prev => prev.filter(c => c.id !== idToDelete));
         setFavorites(favorites.filter((f: any) => f.cantoId !== idToDelete));
-
         if (onCantoDeleted) onCantoDeleted(idToDelete);
         await invoke("delete_canto", { id: idToDelete });
     };
   
     return (
       <div className="flex flex-col h-full p-3 select-none bg-sidebar/30 relative" onContextMenu={handleBgContextMenu}>
-        
         <div className="mb-3 relative group">
            <Search className="absolute left-2 top-2.5 text-gray-500 group-focus-within:text-accent transition-colors" size={12} />
            <input type="text" placeholder="Buscar canto..." value={search} onChange={(e) => setSearch(e.target.value)}
@@ -350,7 +341,6 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
                 </div>
             </div>
         )}
-
       </div>
     );
 };
@@ -399,14 +389,14 @@ const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVers
         e.preventDefault(); setSearch(suggestion + " "); setSuggestion("");
     }
     if (e.key === 'Enter') {
-        const matchFull = search.match(/(.+?)\s+(\d+)[:\s](\d+)/);
-        const matchCap = search.match(/(.+?)\s+(\d+)$/);
+        const matchFull = search.search(/(.+?)\s+(\d+)[:\s](\d+)/);
         let rawBook = "", cap = 0, ver = 1;
+        const match = search.match(/(.+?)\s+(\d+)(?:[:\s](\d+))?/);
 
-        if (matchFull) {
-            rawBook = matchFull[1].trim(); cap = parseInt(matchFull[2]); ver = parseInt(matchFull[3]);
-        } else if (matchCap) {
-            rawBook = matchCap[1].trim(); cap = parseInt(matchCap[2]);
+        if (match) {
+            rawBook = match[1].trim(); 
+            cap = parseInt(match[2]); 
+            if(match[3]) ver = parseInt(match[3]);
         }
 
         if (rawBook) {
@@ -476,7 +466,178 @@ const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVers
 };
 
 // ==========================================
-// 3. SIDEBAR IZQUIERDO
+// 2C. BIBLIOTECA DE IMÁGENES
+// ==========================================
+const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageAspectChanged }: any) => {
+    const [images, setImages] = useState<any[]>([]);
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, image: any | null } | null>(null);
+    const [showDeleteModal, setShowDeleteModal] = useState<any>(null); 
+    const [showAspectSubMenu, setShowAspectSubMenu] = useState(false); 
+
+    const loadImages = () => {
+        invoke("get_all_images").then((data: any) => setImages(data));
+    };
+
+    useEffect(() => { loadImages(); }, []);
+
+    // CORRECCIÓN: Prevención de desbordamiento en menú
+    const handleBgContextMenu = (e: React.MouseEvent) => {
+        e.preventDefault();
+        let x = e.clientX; 
+        let y = e.clientY;
+        if (window.innerHeight - y < 100) y -= 100;
+        setContextMenu({ x, y, image: null });
+        setShowAspectSubMenu(false);
+    };
+
+    const handleItemContextMenu = (e: React.MouseEvent, img: any) => {
+        e.preventDefault(); e.stopPropagation();
+        let x = e.clientX; 
+        let y = e.clientY;
+        if (window.innerHeight - y < 200) y -= 200; // Aquí quitamos más altura porque el menú de imagen es largo
+        if (window.innerWidth - x < 250) x -= 250;  // Espacio extra por si sale el submenú a la derecha
+        
+        setContextMenu({ x, y, image: img });
+        setShowAspectSubMenu(false); 
+    };
+
+    const closeContextMenu = () => {
+        setContextMenu(null);
+        setShowAspectSubMenu(false);
+    };
+
+    const handleAddImage = async () => {
+        closeContextMenu();
+        try {
+            const path = await invoke("select_background_image");
+            if (path) {
+                const pathStr = path as string;
+                const nombre = pathStr.split(/[/\\]/).pop() || "Imagen";
+                await invoke("add_image_db", { nombre, ruta: pathStr });
+                loadImages();
+            }
+        } catch (error) { console.error("Error agregando imagen", error); }
+    };
+
+    const handleDeleteImage = async () => {
+        if (!showDeleteModal) return;
+        await invoke("delete_image_db", { id: showDeleteModal.id });
+        if (onImageDeleted) onImageDeleted(showDeleteModal.ruta); 
+        setShowDeleteModal(null);
+        loadImages();
+    };
+
+    const handleAspectChange = async (newAspect: string) => {
+        if (!contextMenu?.image) return;
+        const imgId = contextMenu.image.id;
+        
+        await invoke("update_image_aspect", { id: imgId, aspecto: newAspect });
+        setImages(prev => prev.map(img => img.id === imgId ? { ...img, aspecto: newAspect } : img));
+        if (onImageAspectChanged) onImageAspectChanged(imgId, newAspect);
+        
+        closeContextMenu();
+    };
+
+    return (
+        <div className="flex flex-col h-full p-3 select-none bg-sidebar/30 relative" onContextMenu={handleBgContextMenu}>
+            <div className="flex-1 overflow-y-auto bg-black/40 rounded-lg border border-white/5 p-2 scrollbar-thin relative">
+                {images.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
+                        <ImageIcon size={40} className="mb-2 text-gray-400" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 leading-relaxed pointer-events-none">
+                            Presione clic derecho<br/>para ver las opciones
+                        </p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 gap-1">
+                        {images.map(img => (
+                            <div key={img.id} 
+                                 onClick={() => onSelectImage(img)} 
+                                 onDoubleClick={() => onProjectImage(img)}
+                                 onContextMenu={(e) => handleItemContextMenu(e, img)}
+                                 className="p-1 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex items-center gap-3 group cursor-pointer transition-all border border-transparent hover:border-white/10">
+                                <img src={convertFileSrc(img.ruta)} className="w-16 h-10 object-cover rounded shadow-sm bg-black" alt={img.nombre} />
+                                <span className="font-bold text-gray-300 group-hover:text-accent truncate flex-1 leading-tight">{img.nombre}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* MENÚ CLICK DERECHO LIBRERÍA */}
+            {contextMenu && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={closeContextMenu} onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
+                    <div className="fixed z-50 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-52 animate-in fade-in zoom-in duration-150" style={{ top: contextMenu.y, left: contextMenu.x }}>
+                        <button onClick={handleAddImage} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
+                            <Plus size={12}/> Agregar Imagen
+                        </button>
+                        {contextMenu.image && (
+                            <>
+                                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                                
+                                <div className="relative group/aspect">
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); setShowAspectSubMenu(!showAspectSubMenu); }} 
+                                        className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center justify-between">
+                                        <div className="flex items-center gap-2"><Maximize size={12}/> Aspecto de Imagen</div>
+                                        <ChevronRight size={12} className={showAspectSubMenu ? "text-accent" : ""} />
+                                    </button>
+                                    
+                                    {showAspectSubMenu && (
+                                        <div className="absolute top-0 left-[98%] bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-48 animate-in slide-in-from-left-2 duration-150 z-50">
+                                            <button onClick={() => handleAspectChange('contain')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'contain' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>
+                                                <Minimize size={12}/> Ajustar al centro
+                                            </button>
+                                            <button onClick={() => handleAspectChange('cover')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'cover' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>
+                                                <Maximize size={12}/> Rellenar pantalla
+                                            </button>
+                                            <button onClick={() => handleAspectChange('fill')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'fill' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>
+                                                <Type size={12}/> Estirar
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                                <button onClick={() => { setShowDeleteModal(contextMenu.image); closeContextMenu(); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2">
+                                    <Trash2 size={12}/> Eliminar Imagen
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {showDeleteModal && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-sidebar border border-white/10 w-[400px] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-center">
+                        <div className="p-8 pb-4 flex flex-col items-center gap-4">
+                            <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center text-red-500"><AlertTriangle size={28} /></div>
+                            <div>
+                                <h3 className="text-lg font-black text-white mb-2">¿Eliminar Imagen?</h3>
+                                <p className="text-xs text-gray-400 leading-relaxed">Estás a punto de eliminar <strong className="text-white">"{showDeleteModal.nombre}"</strong>. <br/> Desaparecerá de la biblioteca.</p>
+                            </div>
+                        </div>
+                        <div className="p-4 bg-black/40 border-t border-white/5 flex gap-3 mt-4">
+                            <button onClick={() => setShowDeleteModal(null)} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-gray-400 bg-panel hover:bg-white/5 transition-colors border border-white/5">No, Cancelar</button>
+                            <button onClick={handleDeleteImage} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-white bg-red-600 hover:bg-red-500 transition-colors shadow-lg shadow-red-500/20">Sí, Eliminar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {images.length > 0 && (
+                <div className="text-[9px] text-center text-gray-600 mt-2 font-bold uppercase pointer-events-none">
+                    Clic derecho para opciones
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ==========================================
+// 3. SIDEBAR IZQUIERDO (CORRECCIÓN DE OVERFLOW)
 // ==========================================
 const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
   const location = useLocation();
@@ -485,24 +646,30 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
 
   return (
     <aside className="w-60 bg-sidebar border-r border-black/50 flex flex-col h-full shrink-0 z-20 shadow-xl">
-      <div className="h-14 flex items-center px-4 border-b border-white/5 gap-2">
+      <div className="h-14 flex items-center px-4 border-b border-white/5 gap-2 shrink-0">
         <MonitorPlay size={20} className="text-accent" />
         <span className="font-black text-sm tracking-tight text-gray-100">WORSHIP RS</span>
       </div>
-      <nav className="flex-1 py-3 space-y-1">
+      
+      {/* CORRECCIÓN: Le quitamos el flex-1 para que no empuje el contenedor de abajo */}
+      <nav className="shrink-0 py-3 space-y-1">
         <Link to="/" className={menuClass('/')}><Music size={16}/> Cantos</Link>
         <Link to="/bibles" className={menuClass('/bibles')}><BookOpen size={16}/> Biblias</Link>
         <div className="pt-4 pb-2 text-[9px] font-bold text-gray-600 uppercase px-4 tracking-widest">Multimedia</div>
-        <Link to="#" className={menuClass('/images')}><Image size={16}/> Imágenes</Link>
+        <Link to="/images" className={menuClass('/images')}><ImageIcon size={16}/> Imágenes</Link>
         <Link to="#" className={menuClass('/videos')}><Video size={16}/> Videos</Link>
         <Link to="#" className={menuClass('/pdf')}><FileText size={16}/> Presentación PDF</Link>
       </nav>
-      <div className="h-[500px] bg-black/20 border-t border-white/5 p-3 flex flex-col">
-        <div className="flex items-center justify-between mb-3 px-1">
+      
+      {/* CORRECCIÓN: flex-1 min-h-0 le dice que tome el resto de la pantalla y permita el Scroll interno */}
+      <div className="flex-1 min-h-0 bg-black/20 border-t border-white/5 p-3 flex flex-col">
+        <div className="flex items-center justify-between mb-3 px-1 shrink-0">
           <span className="text-yellow-600 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1"><Star size={10} fill="currentColor"/> Favoritos ({favorites.length})</span>
           {favorites.length > 0 && <span className="text-[8px] text-gray-600 cursor-pointer hover:text-red-500" onClick={() => setFavorites([])}>Limpiar</span>}
         </div>
-        <div className={`flex-1 rounded-lg flex flex-col p-1 overflow-y-auto scrollbar-thin transition-colors ${favorites.length === 0 ? 'bg-panel/10 border-2 border-dashed border-white/5 justify-center items-center' : 'bg-transparent'}`}>
+        
+        {/* Aquí está el verdadero contenedor del Scroll */}
+        <div className={`flex-1 min-h-0 rounded-lg flex flex-col p-1 overflow-y-auto scrollbar-thin transition-colors ${favorites.length === 0 ? 'bg-panel/10 border-2 border-dashed border-white/5 justify-center items-center' : 'bg-transparent'}`}>
            {favorites.length === 0 ? (
              <p className="text-[9px] text-gray-500 font-medium uppercase text-center pointer-events-none">Selecciona la estrella <br/> para añadir aquí</p>
            ) : (
@@ -525,13 +692,13 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
 };
 
 // ==========================================
-// 4. DASHBOARD PRINCIPAL (ACTUALIZADO CON INVALIDACIÓN DE CACHÉ)
+// 4. DASHBOARD PRINCIPAL
 // ==========================================
 const DashboardLayout = () => {
   const [currentChapter, setCurrentChapter] = useState<any[]>([]);
   const [activeVersion, setActiveVersion] = useState("");
-  // NUEVO: Agregamos el ID del canto a la información del panel central para saber qué estamos viendo
-  const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0, cantoId: null as number | null });
+  
+  const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0, cantoId: null as number | null, tipo: 'texto', ruta: '', imgId: null as number | null, aspecto: 'contain' });
   const [previewVerse, setPreviewVerse] = useState<any>(null);
   const [favorites, setFavorites] = useState<any[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null); 
@@ -547,19 +714,21 @@ const DashboardLayout = () => {
   const [recentImages, setRecentImages] = useState<string[]>([]);
   const presetColors = ['#ffffff', '#000000', '#facc15', '#22d3ee', '#f87171', '#4ade80'];
 
+  const [centerMenu, setCenterMenu] = useState<{ x: number, y: number } | null>(null);
+
   useEffect(() => {
-    if (activeVersion && activeBookInfo.book && activeBookInfo.cap > 0) {
+    if (activeVersion && activeBookInfo.book && activeBookInfo.cap > 0 && activeBookInfo.tipo === 'texto') {
         loadChapter(activeVersion, activeBookInfo.book, activeBookInfo.cap);
     }
   }, [activeVersion]);
 
   useEffect(() => {
-    if (previewVerse) {
+    if (previewVerse && previewVerse.tipo !== 'imagen') {
         const index = currentChapter.findIndex(v => isSameVerse(v, previewVerse));
         if (index !== -1) document.getElementById(`verse-${index}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     const handleKey = (e: KeyboardEvent) => {
-        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || !currentChapter.length || !previewVerse) return;
+        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || !currentChapter.length || !previewVerse || previewVerse.tipo === 'imagen') return;
         const idx = currentChapter.findIndex(v => isSameVerse(v, previewVerse));
         if (e.key === 'ArrowDown' && currentChapter[idx + 1]) projectVerse(currentChapter[idx + 1]);
         if (e.key === 'ArrowUp' && currentChapter[idx - 1]) projectVerse(currentChapter[idx - 1]);
@@ -572,21 +741,21 @@ const DashboardLayout = () => {
     const cacheKey = `${version}-${book}-${cap}`;
     if (chapterCache[cacheKey]) {
         setCurrentChapter(chapterCache[cacheKey]);
-        setActiveBookInfo({ book, cap, cantoId: null });
+        setActiveBookInfo({ book, cap, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
         return;
     }
 
     invoke("get_chapter_verses", { version, book, cap }).then((verses: any) => {
       setChapterCache(prev => ({ ...prev, [cacheKey]: verses })); 
       setCurrentChapter(verses);
-      setActiveBookInfo({ book, cap, cantoId: null });
+      setActiveBookInfo({ book, cap, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
     });
   };
 
   const loadCanto = (canto: any) => {
     if (cantoCache[canto.id]) {
         setCurrentChapter(cantoCache[canto.id]);
-        setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id });
+        setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
         return;
     }
 
@@ -596,11 +765,17 @@ const DashboardLayout = () => {
       }));
       setCantoCache(prev => ({ ...prev, [canto.id]: formattedSlides })); 
       setCurrentChapter(formattedSlides);
-      setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id }); 
+      setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' }); 
     }).catch(err => console.error("Error cargando canto:", err));
   };
 
   const projectVerse = (verse: any) => {
+    if (verse.tipo === 'imagen') {
+        invoke("trigger_projection", { verse });
+        setPreviewVerse(verse);
+        return;
+    }
+
     const vWithVersion = { ...verse, versionName: verse.versionName || activeVersion };
     if (verse.capitulo > 0 && (verse.libro !== activeBookInfo.book || verse.capitulo !== activeBookInfo.cap)) {
         loadChapter(vWithVersion.versionName, verse.libro, verse.capitulo);
@@ -614,30 +789,37 @@ const DashboardLayout = () => {
       else projectVerse(fav); 
   };
 
-  // --- MÉTODOS PARA ACTUALIZAR VISTAS AL EDITAR/ELIMINAR ---
   const handleCantoUpdated = (id: number, nuevoTitulo: string, nuevaLetra: string) => {
-      // 1. Convertimos el texto a diapositivas igual que Rust
       const estrofas = nuevaLetra.split('\n\n').map(s => s.trim()).filter(s => s !== '');
       const formattedSlides = estrofas.map((texto, i) => ({
           libro: nuevoTitulo, capitulo: 0, versiculo: i + 1, texto: texto, versionName: "CANTO"
       }));
-
-      // 2. ACTUALIZACIÓN INSTANTÁNEA EN LA CACHÉ
       setCantoCache(prev => ({ ...prev, [id]: formattedSlides }));
-
-      // 3. Si tienes ese canto seleccionado ahora mismo, recargar la vista central al instante
       if (activeBookInfo.cantoId === id) {
           setCurrentChapter(formattedSlides);
           setActiveBookInfo(prev => ({ ...prev, book: nuevoTitulo }));
-          setPreviewVerse(null); // Quita el preview temporalmente para no confundir al sistema
+          setPreviewVerse(null); 
       }
   };
 
   const handleCantoDeleted = (id: number) => {
       if (activeBookInfo.cantoId === id) {
           setCurrentChapter([]);
-          setActiveBookInfo({ book: "", cap: 0, cantoId: null });
+          setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
       }
+  };
+
+  // Se encarga de cambiar instantáneamente la vista al elegir el ajuste en el menú central
+  const applyImageFit = async (fitMode: 'contain' | 'cover' | 'fill') => {
+      if (activeBookInfo.imgId) {
+          // Si lo cambiamos desde el panel central, también lo guardamos en la base de datos
+          await invoke("update_image_aspect", { id: activeBookInfo.imgId, aspecto: fitMode });
+          setActiveBookInfo(prev => ({ ...prev, aspecto: fitMode }));
+          if (previewVerse?.ruta === activeBookInfo.ruta) {
+              projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: fitMode });
+          }
+      }
+      setCenterMenu(null);
   };
 
   const updateStyles = (newS: any) => {
@@ -679,14 +861,62 @@ const DashboardLayout = () => {
           <div className="flex flex-col">
              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Panel de Edición</span>
              <span className="text-lg font-black text-accent tracking-tight">
-                {activeBookInfo.book || "Biblia / Cantos"} <span className="text-gray-400">{activeBookInfo.cap > 0 ? activeBookInfo.cap : ""}</span>
+                {activeBookInfo.book || "Biblia / Cantos / Multimedia"} <span className="text-gray-400">{activeBookInfo.cap > 0 ? activeBookInfo.cap : ""}</span>
              </span>
           </div>
           <Settings size={16} className="text-gray-700 hover:text-gray-300 cursor-pointer" />
         </header>
 
-        <div className="flex-1 overflow-y-auto p-10 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-sidebar via-mainbg to-mainbg scrollbar-thin" ref={scrollRef}>
-          {currentChapter.length > 0 ? (
+        <div className="flex-1 overflow-y-auto p-10 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-sidebar via-mainbg to-mainbg scrollbar-thin relative" ref={scrollRef}>
+          
+          {/* PANEL CENTRAL: IMÁGENES */}
+          {activeBookInfo.tipo === 'imagen' ? (
+              <div className="h-full flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 relative group"
+                   onContextMenu={(e) => { 
+                       e.preventDefault(); 
+                       let x = e.clientX; let y = e.clientY;
+                       if (window.innerHeight - y < 150) y -= 150;
+                       if (window.innerWidth - x < 250) x -= 250;
+                       setCenterMenu({ x, y }); 
+                   }}>
+                  
+                  <img 
+                      src={convertFileSrc(activeBookInfo.ruta)} 
+                      className={`max-w-full max-h-full rounded shadow-2xl cursor-pointer hover:scale-[1.01] transition-transform ring-1 ring-white/10 ${activeBookInfo.aspecto === 'cover' ? 'object-cover w-full h-full' : activeBookInfo.aspecto === 'fill' ? 'object-fill w-full h-full' : 'object-contain'}`}
+                      onClick={() => projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: activeBookInfo.aspecto })}
+                      alt="Vista previa"
+                  />
+                  
+                  <div className="absolute top-4 left-4 bg-black/60 backdrop-blur text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 opacity-70">
+                      Modo: {activeBookInfo.aspecto === 'contain' ? 'Ajustado al centro' : activeBookInfo.aspecto === 'cover' ? 'Rellenar Pantalla' : 'Estirar'}
+                  </div>
+                  <div className="absolute top-4 right-4 bg-black/60 backdrop-blur text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 shadow-lg">
+                      <MonitorPlay size={12} className="inline mr-2 text-accent"/> Un clic para proyectar | Clic derecho para opciones
+                  </div>
+
+                  {/* MENÚ CLICK DERECHO PARA LA IMAGEN CENTRAL */}
+                  {centerMenu && (
+                      <>
+                          <div className="fixed inset-0 z-40 cursor-default" onClick={(e) => { e.stopPropagation(); setCenterMenu(null); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCenterMenu(null); }}></div>
+                          <div className="fixed z-50 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-56 animate-in fade-in zoom-in duration-150" style={{ top: centerMenu.y, left: centerMenu.x }}>
+                              <button onClick={() => applyImageFit('contain')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
+                                  <Minimize size={14}/> Ajustar al centro (Original)
+                              </button>
+                              <div className="h-px bg-white/5 my-0.5 mx-2"></div>
+                              <button onClick={() => applyImageFit('cover')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
+                                  <Maximize size={14}/> Rellenar pantalla completa
+                              </button>
+                              <div className="h-px bg-white/5 my-0.5 mx-2"></div>
+                              <button onClick={() => applyImageFit('fill')} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2">
+                                  <Type size={14}/> Estirar forzado (Ignorar proporción)
+                              </button>
+                          </div>
+                      </>
+                  )}
+              </div>
+
+          // PANEL CENTRAL: TEXTO
+          ) : currentChapter.length > 0 ? (
             <div className="max-w-4xl mx-auto space-y-4">
               {currentChapter.map((v, i) => {
                 const isFav = favorites.some((f: any) => isSameVerse(f, v));
@@ -710,7 +940,7 @@ const DashboardLayout = () => {
           ) : (
             <div className="h-full flex flex-col items-center justify-center opacity-20">
                 <Music size={80} className="mb-4" />
-                <p className="text-xl font-black italic">SELECCIONA UN CANTO O VERSÍCULO</p>
+                <p className="text-xl font-black italic">SELECCIONA UN ARCHIVO DE LA BIBLIOTECA</p>
             </div>
           )}
         </div>
@@ -725,6 +955,29 @@ const DashboardLayout = () => {
                <Routes>
                   <Route path="/" element={<CantosLibrary onSelectCanto={loadCanto} favorites={favorites} setFavorites={setFavorites} onCantoUpdated={handleCantoUpdated} onCantoDeleted={handleCantoDeleted} />} />
                   <Route path="/bibles" element={<BiblesLibrary currentVersion={activeVersion} onVersionChange={setActiveVersion} onSelectChapter={loadChapter} onDirectSearch={(v:any, b:any, c:any, vr:any) => invoke("get_single_verse", {version:v,book:b,cap:c,ver:vr}).then((r:any)=>r&&projectVerse(r))} />} />
+                  
+                  <Route path="/images" element={<ImagesLibrary 
+                      onSelectImage={(img: any) => {
+                          setActiveBookInfo({ book: img.nombre, cap: 0, cantoId: null, tipo: 'imagen', ruta: img.ruta, imgId: img.id, aspecto: img.aspecto });
+                          setPreviewVerse(null);
+                          setCurrentChapter([]);
+                      }}
+                      onProjectImage={(img: any) => projectVerse({ tipo: 'imagen', ruta: img.ruta, aspecto: img.aspecto })}
+                      onImageDeleted={(rutaBorrada: string) => {
+                          if (activeBookInfo.ruta === rutaBorrada) {
+                              setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
+                              setPreviewVerse(null);
+                          }
+                      }}
+                      onImageAspectChanged={(imgId: number, newAspecto: string) => {
+                          if (activeBookInfo.imgId === imgId) {
+                              setActiveBookInfo(prev => ({ ...prev, aspecto: newAspecto }));
+                              if (previewVerse?.ruta === activeBookInfo.ruta) {
+                                  projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: newAspecto });
+                              }
+                          }
+                      }}
+                  />} />
                </Routes>
             </div>
         </div>
@@ -741,15 +994,18 @@ const DashboardLayout = () => {
         <div className="p-4 bg-black/40 border-t border-white/10 space-y-3 relative z-10">
             <div className="h-28 bg-black rounded-lg flex items-center justify-center border border-white/5 relative overflow-hidden bg-cover bg-center"
                  style={{ 
-                    backgroundImage: activeStyles.bgImage ? `url('${convertFileSrc(activeStyles.bgImage)}')` : 'none',
-                    backgroundColor: activeStyles.bgColor 
+                    backgroundImage: previewVerse?.tipo === 'imagen' ? `url('${convertFileSrc(previewVerse.ruta)}')` : (activeStyles.bgImage ? `url('${convertFileSrc(activeStyles.bgImage)}')` : 'none'),
+                    backgroundColor: previewVerse?.tipo === 'imagen' ? '#000' : activeStyles.bgColor,
+                    backgroundSize: previewVerse?.tipo === 'imagen' && previewVerse.aspecto === 'contain' ? 'contain' : (previewVerse?.tipo === 'imagen' && previewVerse.aspecto === 'fill' ? '100% 100%' : 'cover')
                  }}>
                  {previewVerse ? (
-                    <div className="p-3 text-center w-full drop-shadow-md">
-                        <p className="text-[10px] font-bold line-clamp-3 leading-tight" style={{ color: activeStyles.textColor }}>
-                            {isPreviewCanto ? previewVerse.texto : `"${previewVerse.texto}"`}
-                        </p>
-                    </div>
+                    previewVerse.tipo !== 'imagen' && (
+                        <div className="p-3 text-center w-full drop-shadow-md">
+                            <p className="text-[10px] font-bold line-clamp-3 leading-tight" style={{ color: activeStyles.textColor }}>
+                                {isPreviewCanto ? previewVerse.texto : `"${previewVerse.texto}"`}
+                            </p>
+                        </div>
+                    )
                  ) : (
                     <span className="text-[10px] opacity-20 uppercase font-black">Monitor</span>
                  )}
@@ -761,7 +1017,7 @@ const DashboardLayout = () => {
         </div>
       </aside>
 
-      {/* MODAL ESTILOS OMITIDO PARA NO HACER LARGO EL CÓDIGO (es idéntico al tuyo) */}
+      {/* MODAL ESTILOS */}
       {showStyleModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-sidebar border border-white/10 w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -790,7 +1046,7 @@ const DashboardLayout = () => {
 
                 <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
                     <div>
-                        <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><Image size={10}/> Fondo Actual: {styleTab}</p>
+                        <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><ImageIcon size={10}/> Fondo Actual: {styleTab}</p>
                         
                         <div className="grid grid-cols-4 gap-3 mb-4">
                             <div onClick={() => updateStyles({ bgColor: '#000000', bgImage: '' })} 
