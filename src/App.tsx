@@ -22,7 +22,7 @@ const isSameVerse = (v1: any, v2: any) => {
 };
 
 // ==========================================
-// 1. VISTA DEL PROYECTOR (CORREGIDO: SIN SOMBRA)
+// 1. VISTA DEL PROYECTOR
 // ==========================================
 const ProjectorView = () => {
   const [liveVerse, setLiveVerse] = useState<any>(null);
@@ -62,13 +62,18 @@ const ProjectorView = () => {
     return () => clearTimeout(timeout);
   }, [liveVerse]);
 
+  // Construcción del estilo con comillas de seguridad para rutas con espacios
   const containerStyle: any = {
-      backgroundColor: styles.bgColor,
-      color: styles.textColor
+    backgroundColor: styles.bgColor,
+    color: styles.textColor,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat'
   };
 
   if (styles.bgImage) {
-      containerStyle.backgroundImage = `url(${convertFileSrc(styles.bgImage)})`;
+      const assetUrl = convertFileSrc(styles.bgImage);
+      containerStyle.backgroundImage = `url('${assetUrl}')`;
   } else {
       containerStyle.backgroundImage = 'none';
   }
@@ -81,14 +86,12 @@ const ProjectorView = () => {
       {displayVerse && (
         <div className="w-full h-full flex flex-col justify-center transition-opacity duration-300" style={{ opacity }}>
           <div className="flex-1 flex items-center justify-center">
-            {/* SE ELIMINÓ LA CLASE drop-shadow PARA QUITAR EL SOMBREADO */}
             <p style={{ fontSize: `${fontSize}px`, lineHeight: 1.1 }} className="font-bold text-center font-sans w-full leading-tight">
                 "{displayVerse.texto}"
             </p>
           </div>
           <div className="flex justify-end mt-2">
              <div className="border-r-8 pr-4" style={{ borderColor: styles.textColor === '#ffffff' ? '#3b82f6' : styles.textColor }}>
-                {/* También se eliminó drop-shadow aquí para consistencia */}
                 <p className="text-5xl font-black italic uppercase tracking-widest">
                    {displayVerse.libro} {displayVerse.capitulo}:{displayVerse.versiculo}
                 </p>
@@ -261,7 +264,7 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
 };
 
 // ==========================================
-// 4. DASHBOARD (CORREGIDO: PESTAÑA DE PERSONALIZAR)
+// 4. DASHBOARD
 // ==========================================
 const DashboardLayout = () => {
   const [currentChapter, setCurrentChapter] = useState<any[]>([]);
@@ -274,7 +277,6 @@ const DashboardLayout = () => {
   const [projStyles, setProjStyles] = useState({ bgColor: '#000000', textColor: '#ffffff', bgImage: '' });
   const [showStyleModal, setShowStyleModal] = useState(false);
   const [recentImages, setRecentImages] = useState<string[]>([]);
-
   const presetColors = ['#ffffff', '#000000', '#facc15', '#22d3ee', '#f87171', '#4ade80'];
 
   useEffect(() => {
@@ -320,11 +322,16 @@ const DashboardLayout = () => {
   };
 
   const handleBgImageUpload = async () => {
-    const path = await invoke("select_background_image");
-    if (path) {
-        const pStr = path as string;
-        if (!recentImages.includes(pStr)) setRecentImages([...recentImages, pStr]);
-        updateStyles({ bgImage: pStr, bgColor: 'transparent' });
+    try {
+        const path = await invoke("select_background_image");
+        if (path) {
+            console.log("Imagen seleccionada:", path); // DEBUG
+            const pStr = path as string;
+            if (!recentImages.includes(pStr)) setRecentImages([...recentImages, pStr]);
+            updateStyles({ bgImage: pStr, bgColor: 'transparent' });
+        }
+    } catch (error) {
+        console.error("Error seleccionando imagen:", error);
     }
   };
 
@@ -385,29 +392,25 @@ const DashboardLayout = () => {
             </div>
         </div>
 
-        {/* --- NUEVA PESTAÑA DE PERSONALIZAR (Estilo Tab) --- */}
-        <div className="flex-shrink-0 relative z-20 mt-2">
-            <div className="flex items-end px-4">
-                <button 
-                    onClick={() => setShowStyleModal(true)} 
-                    className="bg-accent hover:bg-accent/90 text-white text-[10px] font-bold uppercase py-1 px-3 rounded-t-md shadow-sm flex items-center gap-2 transition-all translate-y-[1px]"
-                >
-                    <Palette size={12}/> PERSONALIZAR
-                </button>
-            </div>
+        {/* --- PESTAÑA PERSONALIZAR --- */}
+        <div className="flex-shrink-0 relative z-20 mt-2 pl-4">
+             <button 
+                onClick={() => setShowStyleModal(true)} 
+                className="bg-accent hover:bg-accent/90 text-white text-[9px] font-bold uppercase py-1 px-4 rounded-t-lg shadow-sm flex items-center gap-2 transition-all translate-y-[1px]"
+            >
+                <Palette size={10}/> PERSONALIZAR
+            </button>
         </div>
 
-        {/* Contenedor del Monitor y Botón Proyectar (Con borde superior que conecta con la pestaña) */}
         <div className="p-4 bg-black/40 border-t border-white/10 space-y-3 relative z-10">
             {/* Monitor Preview */}
             <div className="h-28 bg-black rounded-lg flex items-center justify-center border border-white/5 relative overflow-hidden bg-cover bg-center"
                  style={{ 
-                    backgroundImage: projStyles.bgImage ? `url(${convertFileSrc(projStyles.bgImage)})` : 'none',
+                    backgroundImage: projStyles.bgImage ? `url('${convertFileSrc(projStyles.bgImage)}')` : 'none',
                     backgroundColor: projStyles.bgColor 
                  }}>
                  {previewVerse ? (
                     <div className="p-3 text-center w-full">
-                        {/* SE ELIMINÓ drop-shadow TAMBIÉN EN EL MONITOR */}
                         <p className="text-[10px] font-bold line-clamp-3 leading-tight" style={{ color: projStyles.textColor }}>"{previewVerse.texto}"</p>
                     </div>
                  ) : (
@@ -436,7 +439,6 @@ const DashboardLayout = () => {
                 </div>
 
                 <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
-                    
                     {/* Sección Fondo */}
                     <div>
                         <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><Image size={10}/> Fondo de Pantalla</p>
@@ -465,7 +467,7 @@ const DashboardLayout = () => {
                                     {recentImages.map((img, idx) => (
                                         <div key={idx} onClick={() => updateStyles({ bgImage: img, bgColor: 'transparent' })}
                                              className={`aspect-video rounded-lg border cursor-pointer bg-cover bg-center relative group ${projStyles.bgImage === img ? 'border-accent ring-1 ring-accent' : 'border-white/10 hover:border-white/40'}`}
-                                             style={{ backgroundImage: `url(${convertFileSrc(img)})` }}>
+                                             style={{ backgroundImage: `url('${convertFileSrc(img)}')` }}>
                                              <button onClick={(e) => {e.stopPropagation(); setRecentImages(recentImages.filter(i => i !== img))}} 
                                                 className="absolute top-1 right-1 bg-black/50 text-white p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500">
                                                 <X size={8}/>
