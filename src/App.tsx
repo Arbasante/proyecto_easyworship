@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
 import { Music, BookOpen, Image, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, Settings, Trash2, Palette, X, Plus, Minus, Edit2, AlertTriangle, Type } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -138,17 +138,58 @@ const ProjectorView = () => {
 };
 
 // ==========================================
-// 2A. BIBLIOTECA DE CANTOS
+// NUEVO: COMPONENTE AISLADO PARA EL EDITOR
+// (Garantiza 0 lag al teclear)
 // ==========================================
-const CantosLibrary = ({ onSelectCanto, favorites, setFavorites }: any) => {
+const CantoEditorModal = ({ isEdit, initialData, onClose, onSave }: any) => {
+    const [formData, setFormData] = useState(initialData || { titulo: '', letra: '' });
+
+    return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-sidebar border border-white/10 w-[600px] rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+                <div className="flex justify-between items-center p-4 border-b border-white/5 bg-panel/50">
+                    <h2 className="text-sm font-black uppercase text-accent tracking-widest flex items-center gap-2">
+                        {isEdit ? <><Edit2 size={16}/> Editar Canto</> : <><Plus size={16}/> Nuevo Canto</>}
+                    </h2>
+                    <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+                        <X size={18}/>
+                    </button>
+                </div>
+                <div className="p-6 flex flex-col gap-4 overflow-y-auto flex-1">
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">Título del Canto</label>
+                        <input type="text" value={formData.titulo} onChange={(e) => setFormData({...formData, titulo: e.target.value})} placeholder="Ej: Cuan Grande es Él"
+                            className="w-full bg-panel border border-white/10 rounded-lg p-3 text-sm focus:border-accent outline-none font-bold text-white shadow-inner" />
+                    </div>
+                    <div className="flex-1 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">
+                            Letra <span className="text-gray-600 font-normal normal-case">(Separa cada diapositiva dejando un renglón en blanco)</span>
+                        </label>
+                        <textarea value={formData.letra} onChange={(e) => setFormData({...formData, letra: e.target.value})} placeholder="Señor mi Dios al contemplar los cielos...\n\nMi corazón entona la canción..."
+                            className="w-full flex-1 bg-panel border border-white/10 rounded-lg p-4 text-sm focus:border-accent outline-none text-gray-300 shadow-inner min-h-[300px] resize-none custom-scrollbar leading-relaxed" />
+                    </div>
+                </div>
+                <div className="p-4 bg-black/40 border-t border-white/5 flex justify-end gap-3">
+                    <button onClick={onClose} className="px-5 py-2 rounded-lg text-[10px] font-bold uppercase text-gray-400 hover:text-white transition-colors">Cancelar</button>
+                    <button onClick={() => onSave(formData)} disabled={!formData.titulo.trim() || !formData.letra.trim()}
+                        className="bg-accent text-white px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Guardar</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// ==========================================
+// 2A. BIBLIOTECA DE CANTOS (ÓPTIMA)
+// ==========================================
+const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated, onCantoDeleted }: any) => {
     const [cantos, setCantos] = useState<any[]>([]);
     const [search, setSearch] = useState("");
     
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, canto: any | null } | null>(null);
     const [showAddModal, setShowAddModal] = useState(false);
-    const [showEditModal, setShowEditModal] = useState<any>(null);
+    const [editData, setEditData] = useState<any>(null); 
     const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
-    const [formData, setFormData] = useState({ titulo: '', letra: '' });
   
     const loadCantosFromDB = () => {
         invoke("get_all_cantos").then((data: any) => setCantos(data));
@@ -156,7 +197,12 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites }: any) => {
 
     useEffect(() => { loadCantosFromDB(); }, []);
   
-    const filteredCantos = cantos.filter(c => normalizeText(c.titulo).includes(normalizeText(search)));
+    // Evita volver a buscar si no cambia la lista o el texto
+    const filteredCantos = useMemo(() => {
+        if (!search) return cantos;
+        const normSearch = normalizeText(search);
+        return cantos.filter(c => normalizeText(c.titulo).includes(normSearch));
+    }, [cantos, search]);
 
     const toggleFavCanto = (e: any, canto: any) => {
         e.stopPropagation(); 
@@ -165,14 +211,9 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites }: any) => {
             setFavorites(favorites.filter((f: any) => f.cantoId !== canto.id));
         } else {
             setFavorites([...favorites, {
-                isCanto: true,
-                cantoId: canto.id,
-                libro: canto.titulo,
-                capitulo: 0,
-                versiculo: '🎵',
-                texto: 'Canto completo',
-                versionName: 'CANTO',
-                cantoData: canto 
+                isCanto: true, cantoId: canto.id, libro: canto.titulo,
+                capitulo: 0, versiculo: '🎵', texto: 'Canto completo',
+                versionName: 'CANTO', cantoData: canto 
             }]);
         }
     };
@@ -190,7 +231,6 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites }: any) => {
     const closeContextMenu = () => setContextMenu(null);
 
     const openAddModal = () => {
-        setFormData({ titulo: '', letra: '' });
         setShowAddModal(true);
         closeContextMenu();
     };
@@ -201,8 +241,7 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites }: any) => {
         if (!canto) return;
         const slides: any = await invoke("get_canto_diapositivas", { cantoId: canto.id });
         const letraCompleta = slides.map((s: any) => s.texto).join('\n\n');
-        setFormData({ titulo: canto.titulo, letra: letraCompleta });
-        setShowEditModal(canto);
+        setEditData({ id: canto.id, titulo: canto.titulo, letra: letraCompleta });
     };
 
     const openDeleteModal = () => {
@@ -210,25 +249,36 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites }: any) => {
         closeContextMenu();
     };
 
-    const handleSaveAdd = async () => {
-        if (!formData.titulo.trim() || !formData.letra.trim()) return;
-        await invoke("add_canto", { titulo: formData.titulo, letra: formData.letra });
+    // --- ACCIONES OPTIMIZADAS ---
+    const handleSaveAdd = async (data: any) => {
         setShowAddModal(false);
-        loadCantosFromDB();
+        await invoke("add_canto", { titulo: data.titulo, letra: data.letra });
+        loadCantosFromDB(); 
     };
 
-    const handleSaveEdit = async () => {
-        if (!formData.titulo.trim() || !formData.letra.trim()) return;
-        await invoke("update_canto", { id: showEditModal.id, titulo: formData.titulo, letra: formData.letra });
-        setShowEditModal(null);
-        loadCantosFromDB();
+    const handleSaveEdit = async (data: any) => {
+        const idToEdit = editData.id;
+        setEditData(null); // 1. Cierra modal en 0ms
+
+        // 2. Actualización Optimista Local
+        setCantos(prev => prev.map(c => c.id === idToEdit ? { ...c, titulo: data.titulo } : c));
+
+        // 3. Modifica Caché y Vista Central en 0ms
+        if (onCantoUpdated) onCantoUpdated(idToEdit, data.titulo, data.letra);
+
+        // 4. Escribe en Base de datos silenciosamente
+        await invoke("update_canto", { id: idToEdit, titulo: data.titulo, letra: data.letra });
     };
 
     const handleConfirmDelete = async () => {
-        await invoke("delete_canto", { id: showDeleteModal.id });
-        setFavorites(favorites.filter((f: any) => f.cantoId !== showDeleteModal.id));
-        setShowDeleteModal(null);
-        loadCantosFromDB();
+        const idToDelete = showDeleteModal.id;
+        setShowDeleteModal(null); 
+
+        setCantos(prev => prev.filter(c => c.id !== idToDelete));
+        setFavorites(favorites.filter((f: any) => f.cantoId !== idToDelete));
+
+        if (onCantoDeleted) onCantoDeleted(idToDelete);
+        await invoke("delete_canto", { id: idToDelete });
     };
   
     return (
@@ -280,42 +330,9 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites }: any) => {
             </>
         )}
 
-        {/* MODAL AGREGAR / EDITAR CANTO */}
-        {(showAddModal || showEditModal) && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in">
-                <div className="bg-sidebar border border-white/10 w-[600px] rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
-                    <div className="flex justify-between items-center p-4 border-b border-white/5 bg-panel/50">
-                        <h2 className="text-sm font-black uppercase text-accent tracking-widest flex items-center gap-2">
-                            {showAddModal ? <><Plus size={16}/> Nuevo Canto</> : <><Edit2 size={16}/> Editar Canto</>}
-                        </h2>
-                        <button onClick={() => { setShowAddModal(false); setShowEditModal(null); }} className="text-gray-500 hover:text-white transition-colors">
-                            <X size={18}/>
-                        </button>
-                    </div>
-                    <div className="p-6 flex flex-col gap-4 overflow-y-auto flex-1">
-                        <div>
-                            <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">Título del Canto</label>
-                            <input type="text" value={formData.titulo} onChange={(e) => setFormData({...formData, titulo: e.target.value})} placeholder="Ej: Cuan Grande es Él"
-                                className="w-full bg-panel border border-white/10 rounded-lg p-3 text-sm focus:border-accent outline-none font-bold text-white shadow-inner" />
-                        </div>
-                        <div className="flex-1 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">
-                                Letra <span className="text-gray-600 font-normal normal-case">(Separa cada diapositiva dejando un renglón en blanco)</span>
-                            </label>
-                            <textarea value={formData.letra} onChange={(e) => setFormData({...formData, letra: e.target.value})} placeholder="Señor mi Dios al contemplar los cielos...\n\nMi corazón entona la canción..."
-                                className="w-full flex-1 bg-panel border border-white/10 rounded-lg p-4 text-sm focus:border-accent outline-none text-gray-300 shadow-inner min-h-[300px] resize-none custom-scrollbar leading-relaxed" />
-                        </div>
-                    </div>
-                    <div className="p-4 bg-black/40 border-t border-white/5 flex justify-end gap-3">
-                        <button onClick={() => { setShowAddModal(false); setShowEditModal(null); }} className="px-5 py-2 rounded-lg text-[10px] font-bold uppercase text-gray-400 hover:text-white transition-colors">Cancelar</button>
-                        <button onClick={showAddModal ? handleSaveAdd : handleSaveEdit} disabled={!formData.titulo.trim() || !formData.letra.trim()}
-                            className="bg-accent text-white px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-accent/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Guardar</button>
-                    </div>
-                </div>
-            </div>
-        )}
+        {showAddModal && <CantoEditorModal isEdit={false} onClose={() => setShowAddModal(false)} onSave={handleSaveAdd} />}
+        {editData && <CantoEditorModal isEdit={true} initialData={editData} onClose={() => setEditData(null)} onSave={handleSaveEdit} />}
 
-        {/* MODAL CONFIRMAR ELIMINACIÓN */}
         {showDeleteModal && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in">
                 <div className="bg-sidebar border border-white/10 w-[400px] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-center">
@@ -508,17 +525,17 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
 };
 
 // ==========================================
-// 4. DASHBOARD PRINCIPAL (CON SISTEMA DE CACHÉ)
+// 4. DASHBOARD PRINCIPAL (ACTUALIZADO CON INVALIDACIÓN DE CACHÉ)
 // ==========================================
 const DashboardLayout = () => {
   const [currentChapter, setCurrentChapter] = useState<any[]>([]);
   const [activeVersion, setActiveVersion] = useState("");
-  const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0 });
+  // NUEVO: Agregamos el ID del canto a la información del panel central para saber qué estamos viendo
+  const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0, cantoId: null as number | null });
   const [previewVerse, setPreviewVerse] = useState<any>(null);
   const [favorites, setFavorites] = useState<any[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null); 
 
-  // --- SISTEMA DE CACHÉ EN MEMORIA ---
   const [chapterCache, setChapterCache] = useState<Record<string, any[]>>({});
   const [cantoCache, setCantoCache] = useState<Record<number, any[]>>({});
 
@@ -553,44 +570,34 @@ const DashboardLayout = () => {
 
   const loadChapter = (version: string, book: string, cap: number) => {
     const cacheKey = `${version}-${book}-${cap}`;
-    
-    // Si ya lo pedimos antes, lo cargamos instantáneamente de la RAM
     if (chapterCache[cacheKey]) {
         setCurrentChapter(chapterCache[cacheKey]);
-        setActiveBookInfo({ book, cap });
+        setActiveBookInfo({ book, cap, cantoId: null });
         return;
     }
 
-    // Si no está en caché, le preguntamos a Rust (quien ahora tiene una conexión súper rápida)
     invoke("get_chapter_verses", { version, book, cap }).then((verses: any) => {
-      setChapterCache(prev => ({ ...prev, [cacheKey]: verses })); // Guardar en caché
+      setChapterCache(prev => ({ ...prev, [cacheKey]: verses })); 
       setCurrentChapter(verses);
-      setActiveBookInfo({ book, cap });
+      setActiveBookInfo({ book, cap, cantoId: null });
     });
   };
 
   const loadCanto = (canto: any) => {
-    // Revisar Caché de cantos
     if (cantoCache[canto.id]) {
         setCurrentChapter(cantoCache[canto.id]);
-        setActiveBookInfo({ book: canto.titulo, cap: 0 });
+        setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id });
         return;
     }
 
     invoke("get_canto_diapositivas", { cantoId: canto.id }).then((slides: any) => {
       const formattedSlides = slides.map((s: any) => ({
-          libro: canto.titulo,
-          capitulo: 0, 
-          versiculo: s.orden,
-          texto: s.texto,
-          versionName: "CANTO"
+          libro: canto.titulo, capitulo: 0, versiculo: s.orden, texto: s.texto, versionName: "CANTO"
       }));
-      setCantoCache(prev => ({ ...prev, [canto.id]: formattedSlides })); // Guardar en caché
+      setCantoCache(prev => ({ ...prev, [canto.id]: formattedSlides })); 
       setCurrentChapter(formattedSlides);
-      setActiveBookInfo({ book: canto.titulo, cap: 0 }); 
-    }).catch(err => {
-      console.error("Error cargando el canto:", err);
-    });
+      setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id }); 
+    }).catch(err => console.error("Error cargando canto:", err));
   };
 
   const projectVerse = (verse: any) => {
@@ -603,17 +610,38 @@ const DashboardLayout = () => {
   };
 
   const handleFavoriteAction = (fav: any) => {
-      if (fav.isCanto) {
-          loadCanto(fav.cantoData);
-      } else {
-          projectVerse(fav); 
+      if (fav.isCanto) loadCanto(fav.cantoData);
+      else projectVerse(fav); 
+  };
+
+  // --- MÉTODOS PARA ACTUALIZAR VISTAS AL EDITAR/ELIMINAR ---
+  const handleCantoUpdated = (id: number, nuevoTitulo: string, nuevaLetra: string) => {
+      // 1. Convertimos el texto a diapositivas igual que Rust
+      const estrofas = nuevaLetra.split('\n\n').map(s => s.trim()).filter(s => s !== '');
+      const formattedSlides = estrofas.map((texto, i) => ({
+          libro: nuevoTitulo, capitulo: 0, versiculo: i + 1, texto: texto, versionName: "CANTO"
+      }));
+
+      // 2. ACTUALIZACIÓN INSTANTÁNEA EN LA CACHÉ
+      setCantoCache(prev => ({ ...prev, [id]: formattedSlides }));
+
+      // 3. Si tienes ese canto seleccionado ahora mismo, recargar la vista central al instante
+      if (activeBookInfo.cantoId === id) {
+          setCurrentChapter(formattedSlides);
+          setActiveBookInfo(prev => ({ ...prev, book: nuevoTitulo }));
+          setPreviewVerse(null); // Quita el preview temporalmente para no confundir al sistema
+      }
+  };
+
+  const handleCantoDeleted = (id: number) => {
+      if (activeBookInfo.cantoId === id) {
+          setCurrentChapter([]);
+          setActiveBookInfo({ book: "", cap: 0, cantoId: null });
       }
   };
 
   const updateStyles = (newS: any) => {
-    let updatedBiblia = bibleStyles;
-    let updatedCantos = cantoStyles;
-
+    let updatedBiblia = bibleStyles; let updatedCantos = cantoStyles;
     if (styleTab === 'biblia') {
         updatedBiblia = { ...bibleStyles, ...newS };
         if (newS.bgColor && !newS.bgImage) updatedBiblia.bgImage = ""; 
@@ -623,7 +651,6 @@ const DashboardLayout = () => {
         if (newS.bgColor && !newS.bgImage) updatedCantos.bgImage = ""; 
         setCantoStyles(updatedCantos);
     }
-
     invoke("trigger_style_update", { styles: { biblia: updatedBiblia, cantos: updatedCantos } });
   };
 
@@ -635,9 +662,7 @@ const DashboardLayout = () => {
             if (!recentImages.includes(pStr)) setRecentImages([...recentImages, pStr]);
             updateStyles({ bgImage: pStr, bgColor: 'transparent' });
         }
-    } catch (error) {
-        console.error("Error seleccionando imagen:", error);
-    }
+    } catch (error) { console.error("Error seleccionando imagen:", error); }
   };
 
   const isPreviewCanto = previewVerse?.capitulo === 0;
@@ -698,7 +723,7 @@ const DashboardLayout = () => {
             </div>
             <div className="flex-1 overflow-hidden">
                <Routes>
-                  <Route path="/" element={<CantosLibrary onSelectCanto={loadCanto} favorites={favorites} setFavorites={setFavorites} />} />
+                  <Route path="/" element={<CantosLibrary onSelectCanto={loadCanto} favorites={favorites} setFavorites={setFavorites} onCantoUpdated={handleCantoUpdated} onCantoDeleted={handleCantoDeleted} />} />
                   <Route path="/bibles" element={<BiblesLibrary currentVersion={activeVersion} onVersionChange={setActiveVersion} onSelectChapter={loadChapter} onDirectSearch={(v:any, b:any, c:any, vr:any) => invoke("get_single_verse", {version:v,book:b,cap:c,ver:vr}).then((r:any)=>r&&projectVerse(r))} />} />
                </Routes>
             </div>
@@ -736,6 +761,7 @@ const DashboardLayout = () => {
         </div>
       </aside>
 
+      {/* MODAL ESTILOS OMITIDO PARA NO HACER LARGO EL CÓDIGO (es idéntico al tuyo) */}
       {showStyleModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-sidebar border border-white/10 w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
