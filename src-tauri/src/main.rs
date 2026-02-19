@@ -4,6 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+// --- ESTRUCTURAS BIBLIA ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct Verse {
     libro: String,
@@ -18,7 +19,127 @@ struct BookInfo {
     capitulos: i32,
 }
 
-// --- COMANDOS ---
+// --- ESTRUCTURAS CANTOS ---
+#[derive(Serialize)]
+struct Canto {
+    id: i32,
+    titulo: String,
+    tono: String,
+    categoria: String,
+}
+
+#[derive(Serialize)]
+struct Diapositiva {
+    id: i32,
+    orden: i32,
+    texto: String,
+}
+
+// ==========================================
+// COMANDOS DE CANTOS (NUEVOS: CRUD)
+// ==========================================
+
+#[tauri::command]
+fn get_all_cantos() -> Vec<Canto> {
+    let conn = Connection::open("cantos.db").expect("DB no encontrada");
+    let mut stmt = conn.prepare("SELECT id, titulo, COALESCE(tono, ''), COALESCE(categoria, '') FROM cantos ORDER BY titulo").unwrap();
+    let iter = stmt.query_map([], |row| {
+        Ok(Canto {
+            id: row.get(0)?,
+            titulo: row.get(1)?,
+            tono: row.get(2)?,
+            categoria: row.get(3)?,
+        })
+    }).unwrap();
+    iter.map(|c| c.unwrap()).collect()
+}
+
+#[tauri::command]
+fn get_canto_diapositivas(canto_id: i32) -> Vec<Diapositiva> {
+    let conn = Connection::open("cantos.db").expect("DB no encontrada");
+    let mut stmt = conn.prepare("SELECT id, orden, texto FROM diapositivas WHERE canto_id = ? ORDER BY orden").unwrap();
+    let iter = stmt.query_map(params![canto_id], |row| {
+        Ok(Diapositiva {
+            id: row.get(0)?,
+            orden: row.get(1)?,
+            texto: row.get(2)?,
+        })
+    }).unwrap();
+    iter.map(|d| d.unwrap()).collect()
+}
+
+#[tauri::command]
+fn add_canto(titulo: String, letra: String) -> Result<(), String> {
+    let conn = Connection::open("cantos.db").map_err(|e| e.to_string())?;
+    
+    // 1. Inserta el canto
+    conn.execute(
+        "INSERT INTO cantos (titulo, tono, categoria) VALUES (?, '', 'Personalizado')",
+        params![titulo],
+    ).map_err(|e| e.to_string())?;
+    
+    let canto_id = conn.last_insert_rowid();
+
+    // 2. Divide la letra por doble salto de línea y guarda las diapositivas
+    let estrofas: Vec<&str> = letra.split("\n\n").collect();
+    let mut orden = 1;
+    for estrofa in estrofas {
+        let estrofa = estrofa.trim();
+        if !estrofa.is_empty() {
+            conn.execute(
+                "INSERT INTO diapositivas (canto_id, orden, texto) VALUES (?, ?, ?)",
+                params![canto_id, orden, estrofa],
+            ).map_err(|e| e.to_string())?;
+            orden += 1;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn update_canto(id: i32, titulo: String, letra: String) -> Result<(), String> {
+    let conn = Connection::open("cantos.db").map_err(|e| e.to_string())?;
+    
+    // 1. Actualiza el título
+    conn.execute("UPDATE cantos SET titulo = ? WHERE id = ?", params![titulo, id])
+        .map_err(|e| e.to_string())?;
+
+    // 2. Borra las diapositivas viejas
+    conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", params![id])
+        .map_err(|e| e.to_string())?;
+
+    // 3. Inserta las nuevas diapositivas
+    let estrofas: Vec<&str> = letra.split("\n\n").collect();
+    let mut orden = 1;
+    for estrofa in estrofas {
+        let estrofa = estrofa.trim();
+        if !estrofa.is_empty() {
+            conn.execute(
+                "INSERT INTO diapositivas (canto_id, orden, texto) VALUES (?, ?, ?)",
+                params![id, orden, estrofa],
+            ).map_err(|e| e.to_string())?;
+            orden += 1;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_canto(id: i32) -> Result<(), String> {
+    let conn = Connection::open("cantos.db").map_err(|e| e.to_string())?;
+    // Primero borramos sus diapositivas
+    conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", params![id])
+        .map_err(|e| e.to_string())?;
+    // Luego borramos el canto
+    conn.execute("DELETE FROM cantos WHERE id = ?", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+
+// ==========================================
+// COMANDOS BIBLIA Y GENERALES
+// ==========================================
 
 #[tauri::command]
 async fn select_background_image(app: tauri::AppHandle) -> Option<String> {
@@ -33,7 +154,6 @@ async fn select_background_image(app: tauri::AppHandle) -> Option<String> {
 
 #[tauri::command]
 fn trigger_style_update(app: tauri::AppHandle, styles: serde_json::Value) {
-    // Buscamos específicamente la ventana "projector"
     if let Some(projector_window) = app.get_webview_window("projector") {
         let _ = projector_window.emit("update-styles", &styles);
     }
@@ -114,7 +234,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_fs::init()) // <--- IMPORTANTE: ESTO HABILITA LA CARGA DE ARCHIVOS
+        .plugin(tauri_plugin_fs::init()) 
         .invoke_handler(tauri::generate_handler![
             open_projector,
             get_bible_versions,
@@ -123,7 +243,12 @@ fn main() {
             get_single_verse,
             trigger_projection,
             select_background_image,
-            trigger_style_update
+            trigger_style_update,
+            get_all_cantos,
+            get_canto_diapositivas,
+            add_canto,            // <--- NUEVO
+            update_canto,         // <--- NUEVO
+            delete_canto          // <--- NUEVO
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
