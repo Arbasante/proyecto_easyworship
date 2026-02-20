@@ -25,6 +25,14 @@ struct Imagen { id: i32, nombre: String, ruta: String, aspecto: String }
 #[derive(Serialize)]
 struct Video { id: i32, nombre: String, ruta: String, bucle: bool }
 
+#[derive(Serialize, Deserialize)]
+struct CantoExport {
+    titulo: String,
+    tono: String,
+    categoria: String,
+    letras: Vec<String>,
+}
+
 // --- ESTADO GLOBAL ---
 struct AppState {
     cantos_db: Mutex<Connection>,
@@ -317,6 +325,81 @@ fn setup_multimedia_db() -> Connection {
     conn
 }
 
+#[tauri::command]
+async fn export_cantos(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use std::fs::File;
+    use std::io::Write;
+
+    let file_path = app.dialog().file().add_filter("JSON", &["json"]).blocking_save_file();
+    let path = match file_path {
+        Some(p) => p.to_string(),
+        None => return Ok("Cancelado".to_string()),
+    };
+
+    let conn = state.cantos_db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, titulo, COALESCE(tono, ''), COALESCE(categoria, '') FROM cantos").map_err(|e| e.to_string())?;
+
+    let cantos_iter = stmt.query_map([], |row| {
+        Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+    }).map_err(|e| e.to_string())?;
+
+    let mut export_data = Vec::new();
+    for c in cantos_iter.flatten() {
+        let (id, titulo, tono, categoria) = c;
+        let mut stmt_diap = conn.prepare("SELECT texto FROM diapositivas WHERE canto_id = ? ORDER BY orden").unwrap();
+        let letras: Vec<String> = stmt_diap.query_map([id], |row| row.get(0)).unwrap().filter_map(Result::ok).collect();
+        export_data.push(CantoExport { titulo, tono, categoria, letras });
+    }
+
+    let json_str = serde_json::to_string_pretty(&export_data).map_err(|e| e.to_string())?;
+    let mut file = File::create(&path).map_err(|e| e.to_string())?;
+    file.write_all(json_str.as_bytes()).map_err(|e| e.to_string())?;
+
+    Ok(format!("Exportado exitosamente a:\n{}", path))
+}
+
+#[tauri::command]
+async fn import_cantos(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use std::fs::read_to_string;
+
+    let file_path = app.dialog().file().add_filter("JSON", &["json"]).blocking_pick_file();
+    let path = match file_path {
+        Some(p) => p.to_string(),
+        None => return Ok("Cancelado".to_string()),
+    };
+
+    let json_str = read_to_string(&path).map_err(|e| e.to_string())?;
+    let import_data: Vec<CantoExport> = serde_json::from_str(&json_str).map_err(|e| format!("Archivo inválido: {}", e))?;
+    
+    
+    let total_importados = import_data.len();
+
+    let conn = state.cantos_db.lock().map_err(|e| e.to_string())?;
+    for canto in import_data {
+        let mut stmt = conn.prepare("SELECT id FROM cantos WHERE titulo = ?").unwrap();
+        let exists: Option<i32> = stmt.query_row([&canto.titulo], |row| row.get(0)).ok();
+
+        let canto_id = if let Some(id) = exists {
+            conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", [id]).unwrap();
+            id as i64
+        } else {
+            conn.execute("INSERT INTO cantos (titulo, tono, categoria) VALUES (?, ?, ?)", [&canto.titulo, &canto.tono, &canto.categoria]).unwrap();
+            conn.last_insert_rowid()
+        };
+
+        for (i, letra) in canto.letras.iter().enumerate() {
+            conn.execute("INSERT INTO diapositivas (canto_id, orden, texto) VALUES (?, ?, ?)", params![canto_id, (i as i32) + 1, letra]).unwrap();
+        }
+    }
+
+    let _ = app.emit("reload-cantos", ()); 
+    
+    
+    Ok(format!("Se importaron {} cantos correctamente.", total_importados))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -358,7 +441,10 @@ fn main() {
             get_all_pdfs,
             add_pdf_db,
             delete_pdf_db,
-            select_pdf_file
+            select_pdf_file,
+            select_pdf_file,
+            export_cantos,
+            import_cantos
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

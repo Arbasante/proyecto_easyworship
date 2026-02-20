@@ -204,7 +204,12 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
     const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
   
     const loadCantosFromDB = () => { invoke("get_all_cantos").then((data: any) => setCantos(data)); };
-    useEffect(() => { loadCantosFromDB(); }, []);
+    useEffect(() => { 
+        loadCantosFromDB(); 
+        // NUEVO: Escucha si Rust importó datos para actualizar la lista al instante
+        const unlisten = listen("reload-cantos", () => loadCantosFromDB());
+        return () => { unlisten.then(f => f()); };
+    }, []);
   
     const filteredCantos = useMemo(() => {
         if (!search) return cantos;
@@ -856,6 +861,8 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
 const DashboardLayout = () => {
   const [currentChapter, setCurrentChapter] = useState<any[]>([]);
   const [activeVersion, setActiveVersion] = useState("");
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
   
   // Agregamos bucle a activeBookInfo
   const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0, cantoId: null as number | null, tipo: 'texto', ruta: '', imgId: null as number | null, aspecto: 'contain', bucle: false });
@@ -1043,10 +1050,11 @@ const DashboardLayout = () => {
           <div className="flex flex-col">
              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Panel de Edición</span>
              <span className="text-lg font-black text-accent tracking-tight">
-                {activeBookInfo.book || "Biblia / Cantos / Multimedia"} <span className="text-gray-400">{activeBookInfo.cap > 0 ? activeBookInfo.cap : ""}</span>
+                {activeBookInfo.book || ""} <span className="text-gray-400">{activeBookInfo.cap > 0 ? activeBookInfo.cap : ""}</span>
              </span>
           </div>
-          <Settings size={16} className="text-gray-700 hover:text-gray-300 cursor-pointer" />
+          
+          <Settings size={16} className="text-gray-500 hover:text-white cursor-pointer transition-transform hover:rotate-90" onClick={() => setShowSettingsModal(true)} />
         </header>
 
         <div className="flex-1 overflow-y-auto p-10 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-sidebar via-mainbg to-mainbg scrollbar-thin relative" ref={scrollRef}>
@@ -1319,6 +1327,42 @@ const DashboardLayout = () => {
 
                 <div className="p-4 bg-black/40 border-t border-white/5 flex justify-end">
                     <button onClick={() => setShowStyleModal(false)} className="bg-white text-black px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-gray-200 transition-colors">Listo</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIGURACIÓN Y BASE DE DATOS */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-sidebar border border-white/10 w-[450px] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+                <div className="flex justify-between items-center p-5 border-b border-white/5 bg-panel/50">
+                    <h2 className="text-xs font-black uppercase text-accent tracking-widest flex items-center gap-2"><Settings size={14}/> Base de Datos</h2>
+                    <button onClick={() => { setShowSettingsModal(false); setSyncMessage(""); }} className="text-gray-500 hover:text-white transition-colors"><X size={16}/></button>
+                </div>
+
+                <div className="p-8 flex flex-col gap-4">
+                    <button onClick={async () => {
+                        const res = await invoke("export_cantos");
+                        setSyncMessage(res as string);
+                    }} className="bg-panel border border-white/10 hover:border-accent hover:bg-white/5 text-gray-300 px-4 py-5 rounded-xl text-xs font-bold uppercase transition-all flex flex-col items-center gap-2 shadow-inner active:scale-95">
+                        <span> Exportar Cantos (Respaldo)</span>
+                        <span className="text-[9px] text-gray-500 normal-case font-normal text-center">Guarda tu biblioteca en un archivo .json <br/>para llevarla a otra computadora.</span>
+                    </button>
+
+                    <button onClick={async () => {
+                        const res = await invoke("import_cantos");
+                        setSyncMessage(res as string);
+                    }} className="bg-panel border border-white/10 hover:border-accent hover:bg-white/5 text-gray-300 px-4 py-5 rounded-xl text-xs font-bold uppercase transition-all flex flex-col items-center gap-2 shadow-inner active:scale-95">
+                        <span> Importar Cantos</span>
+                        <span className="text-[9px] text-gray-500 normal-case font-normal text-center">Carga cantos desde un archivo .json <br/>(Se agregarán y sobreescribirán a los actuales).</span>
+                    </button>
+
+                    {syncMessage && (
+                        <div className={`mt-2 p-3 border rounded-lg text-[10px] font-bold text-center animate-in fade-in ${syncMessage === "Cancelado" ? "bg-panel/50 border-white/10 text-gray-400" : "bg-accent/20 border-accent/30 text-accent"}`}>
+                            {syncMessage}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
