@@ -209,7 +209,7 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
         e.preventDefault(); e.stopPropagation();
         let x = e.clientX; let y = e.clientY;
         if (window.innerHeight - y < 150) y -= 150; 
-        if (window.innerWidth - x < 200) x -= 200;  
+        if (window.innerWidth - x < 250) x -= 250;  
         setContextMenu({ x, y, canto });
     };
 
@@ -401,15 +401,24 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
     useEffect(() => { loadImages(); }, []);
 
     const handleBgContextMenu = (e: React.MouseEvent) => {
-        e.preventDefault(); let x = e.clientX; let y = e.clientY;
-        if (window.innerHeight - y < 100) y -= 100;
+        e.preventDefault(); 
+        let x = e.clientX; let y = e.clientY;
+        
+        // Evitar que se salga por la derecha o por abajo de la pantalla
+        if (x + 220 > window.innerWidth) x = window.innerWidth - 220;
+        if (y + 150 > window.innerHeight) y = window.innerHeight - 150;
+        
         setContextMenu({ x, y, image: null }); setShowAspectSubMenu(false);
     };
 
     const handleItemContextMenu = (e: React.MouseEvent, img: any) => {
-        e.preventDefault(); e.stopPropagation(); let x = e.clientX; let y = e.clientY;
-        if (window.innerHeight - y < 200) y -= 200; 
-        if (window.innerWidth - x < 250) x -= 250;  
+        e.preventDefault(); e.stopPropagation(); 
+        let x = e.clientX; let y = e.clientY;
+        
+        // Evitar que se salga por la derecha o por abajo de la pantalla
+        if (x + 220 > window.innerWidth) x = window.innerWidth - 220;
+        if (y + 180 > window.innerHeight) y = window.innerHeight - 180;
+        
         setContextMenu({ x, y, image: img }); setShowAspectSubMenu(false); 
     };
 
@@ -478,8 +487,9 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
                                         <div className="flex items-center gap-2"><Maximize size={12}/> Aspecto de Imagen</div>
                                         <ChevronRight size={12} className={showAspectSubMenu ? "text-accent" : ""} />
                                     </button>
+                                    
                                     {showAspectSubMenu && (
-                                        <div className="absolute top-0 left-[98%] bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-48 animate-in slide-in-from-left-2 duration-150 z-50">
+                                        <div className="absolute top-0 right-[98%] bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-48 animate-in slide-in-from-right-2 duration-150 z-50">
                                             <button onClick={() => handleAspectChange('contain')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'contain' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}><Minimize size={12}/> Ajustar al centro</button>
                                             <button onClick={() => handleAspectChange('cover')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'cover' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}><Maximize size={12}/> Rellenar pantalla</button>
                                             <button onClick={() => handleAspectChange('fill')} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.image.aspecto === 'fill' ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}><Type size={12}/> Estirar</button>
