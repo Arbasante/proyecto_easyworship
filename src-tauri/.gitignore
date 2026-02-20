@@ -6,7 +6,7 @@
 # will have schema files for capabilities auto-completion
 /gen/schemas
 
-/src-tauri/biblias.db
+
 
 # --- Ecosistema Node.js / React ---
 node_modules/
