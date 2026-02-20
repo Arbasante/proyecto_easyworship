@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Easy Presenter",
-  "version": "0.1.0",
-  "identifier": "com.ti.easyworship-rs",
+  "version": "1.0.0",
+  "identifier": "com.easypresenter.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
