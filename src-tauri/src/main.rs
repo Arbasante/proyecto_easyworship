@@ -487,7 +487,6 @@ fn main() {
             add_pdf_db,
             delete_pdf_db,
             select_pdf_file,
-            select_pdf_file,
             export_cantos,
             import_cantos
         ])
