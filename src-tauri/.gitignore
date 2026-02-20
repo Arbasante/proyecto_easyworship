@@ -51,3 +51,4 @@ Thumbs.db
 *.msi
 *.deb
 *.app
+.gitignore
