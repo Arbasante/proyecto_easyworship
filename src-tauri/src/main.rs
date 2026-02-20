@@ -313,7 +313,7 @@ async fn select_pdf_file(app: tauri::AppHandle) -> Option<String> {
 }*/
 
 fn setup_multimedia_db(path: PathBuf) -> Connection {
-    let conn = setup_db(path);;
+    let conn = setup_db(path);
     
     // TABLA DE IMÁGENES
     conn.execute("CREATE TABLE IF NOT EXISTS imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, aspecto TEXT DEFAULT 'contain')", []).unwrap();
