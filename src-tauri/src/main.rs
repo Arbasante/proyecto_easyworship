@@ -259,6 +259,42 @@ async fn open_projector(app: tauri::AppHandle) {
     }
 }
 
+// ==========================================
+// COMANDOS PDF
+// ==========================================
+#[derive(Serialize)]
+struct PdfDoc { id: i32, nombre: String, ruta: String }
+
+#[tauri::command]
+async fn get_all_pdfs(state: State<'_, AppState>) -> Result<Vec<PdfDoc>, String> {
+    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, nombre, ruta FROM pdfs ORDER BY id DESC").unwrap();
+    let iter = stmt.query_map([], |row| Ok(PdfDoc { id: row.get(0)?, nombre: row.get(1)?, ruta: row.get(2)? })).unwrap();
+    Ok(iter.filter_map(Result::ok).collect())
+}
+
+#[tauri::command]
+async fn add_pdf_db(nombre: String, ruta: String, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO pdfs (nombre, ruta) VALUES (?, ?)", params![nombre, ruta]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_pdf_db(id: i32, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM pdfs WHERE id = ?", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn select_pdf_file(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let file_path = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file();
+    file_path.map(|path| path.to_string())
+}
+
+
 fn setup_db(db_name: &str) -> Connection {
     let conn = Connection::open(db_name).expect(&format!("No se pudo abrir {}", db_name));
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -64000; PRAGMA temp_store = MEMORY;").unwrap();
@@ -276,6 +312,8 @@ fn setup_multimedia_db() -> Connection {
     conn.execute("CREATE TABLE IF NOT EXISTS videos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, bucle INTEGER DEFAULT 0)", []).unwrap();
     let _ = conn.execute("ALTER TABLE videos ADD COLUMN bucle INTEGER DEFAULT 0", []);
     
+    conn.execute("CREATE TABLE IF NOT EXISTS pdfs (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL)", []).unwrap();
+
     conn
 }
 
@@ -316,7 +354,11 @@ fn main() {
             delete_video_db,
             update_video_loop, // <--- Comando Registrado
             select_video_file,
-            trigger_video_control
+            trigger_video_control,
+            get_all_pdfs,
+            add_pdf_db,
+            delete_pdf_db,
+            select_pdf_file
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

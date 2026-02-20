@@ -65,8 +65,8 @@ const ProjectorView = () => {
   }, [liveVerse]);
 
   useLayoutEffect(() => {
-    if (!displayVerse || displayVerse.tipo === 'imagen' || displayVerse.tipo === 'video' || !containerRef.current || !textRef.current) {
-        if (displayVerse?.tipo === 'imagen' || displayVerse?.tipo === 'video') requestAnimationFrame(() => setOpacity(1));
+    if (!displayVerse || displayVerse.tipo === 'imagen' || displayVerse.tipo === 'video' || displayVerse.tipo === 'pdf' || !containerRef.current || !textRef.current) {
+        if (displayVerse?.tipo === 'imagen' || displayVerse?.tipo === 'video' || displayVerse?.tipo === 'pdf') requestAnimationFrame(() => setOpacity(1));
         return;
     }
     const container = containerRef.current;
@@ -85,6 +85,19 @@ const ProjectorView = () => {
     text.style.fontSize = `${finalSize}px`;
     requestAnimationFrame(() => setOpacity(1));
   }, [displayVerse]);
+
+  // ---> AQUÍ AGREGAMOS EL RENDER DEL PDF
+  if (displayVerse?.tipo === 'pdf') {
+      return (
+          <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
+              <iframe 
+                  key={`${displayVerse.ruta}-${displayVerse.pagina}`}
+                  src={`${convertFileSrc(displayVerse.ruta)}#page=${displayVerse.pagina}&view=FitH&toolbar=0&navpanes=0&scrollbar=0`} 
+                  className="w-full h-full border-none bg-black pointer-events-none" 
+              />
+          </div>
+      );
+  }
 
   // RENDER: VIDEO MULTIMEDIA
   if (displayVerse?.tipo === 'video') {
@@ -682,6 +695,110 @@ const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted, onVideoL
 };
 
 // ==========================================
+// EDITOR DE PDF
+// ==========================================
+const PdfLibrary = ({ onSelectPdf, onPdfDeleted }: any) => {
+    const [pdfs, setPdfs] = useState<any[]>([]);
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, pdf: any | null } | null>(null);
+    const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
+
+    const loadPdfs = () => { invoke("get_all_pdfs").then((data: any) => setPdfs(data)); };
+    useEffect(() => { loadPdfs(); }, []);
+
+    const handleBgContextMenu = (e: React.MouseEvent) => {
+        e.preventDefault(); let x = e.clientX; let y = e.clientY;
+        if (x + 220 > window.innerWidth) x = window.innerWidth - 220;
+        if (y + 150 > window.innerHeight) y = window.innerHeight - 150;
+        setContextMenu({ x, y, pdf: null });
+    };
+
+    const handleItemContextMenu = (e: React.MouseEvent, doc: any) => {
+        e.preventDefault(); e.stopPropagation(); let x = e.clientX; let y = e.clientY;
+        if (x + 220 > window.innerWidth) x = window.innerWidth - 220;
+        if (y + 150 > window.innerHeight) y = window.innerHeight - 150;
+        setContextMenu({ x, y, pdf: doc });
+    };
+
+    const closeContextMenu = () => setContextMenu(null);
+
+    const handleAddPdf = async () => {
+        closeContextMenu();
+        try {
+            const path = await invoke("select_pdf_file");
+            if (path) {
+                const pathStr = path as string;
+                const nombre = pathStr.split(/[/\\]/).pop() || "Presentacion";
+                await invoke("add_pdf_db", { nombre, ruta: pathStr });
+                loadPdfs();
+            }
+        } catch (error) { console.error("Error agregando PDF", error); }
+    };
+
+    const handleDeletePdf = async () => {
+        if (!showDeleteModal) return;
+        await invoke("delete_pdf_db", { id: showDeleteModal.id });
+        if (onPdfDeleted) onPdfDeleted(showDeleteModal.ruta); 
+        setShowDeleteModal(null); loadPdfs();
+    };
+
+    return (
+        <div className="flex flex-col h-full p-3 select-none bg-sidebar/30 relative" onContextMenu={handleBgContextMenu}>
+            <div className="flex-1 overflow-y-auto bg-black/40 rounded-lg border border-white/5 p-2 scrollbar-thin relative">
+                {pdfs.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
+                        <FileText size={40} className="mb-2 text-gray-400" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 leading-relaxed pointer-events-none">Presione clic derecho<br/>para agregar PDFs</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 gap-1">
+                        {pdfs.map(doc => (
+                            <div key={doc.id} onClick={() => onSelectPdf(doc)} onContextMenu={(e) => handleItemContextMenu(e, doc)}
+                                 className="p-2 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex items-center gap-3 group cursor-pointer transition-all border border-transparent hover:border-white/10">
+                                <div className="w-8 h-8 bg-red-500/10 text-red-400 rounded flex items-center justify-center group-hover:bg-red-500 group-hover:text-white transition-colors">
+                                    <FileText size={16}/>
+                                </div>
+                                <span className="font-bold text-gray-300 group-hover:text-accent truncate flex-1 leading-tight">{doc.nombre}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {contextMenu && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={closeContextMenu} onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
+                    <div className="fixed z-50 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-44 animate-in fade-in zoom-in duration-150" style={{ top: contextMenu.y, left: contextMenu.x }}>
+                        <button onClick={handleAddPdf} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Plus size={12}/> Agregar PDF</button>
+                        {contextMenu.pdf && (
+                            <>
+                                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                                <button onClick={() => { setShowDeleteModal(contextMenu.pdf); closeContextMenu(); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2"><Trash2 size={12}/> Eliminar PDF</button>
+                            </>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {showDeleteModal && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-sidebar border border-white/10 w-[400px] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-center">
+                        <div className="p-8 pb-4 flex flex-col items-center gap-4">
+                            <div className="w-14 h-14 rounded-full bg-red-500/20 flex items-center justify-center text-red-500"><AlertTriangle size={28} /></div>
+                            <div><h3 className="text-lg font-black text-white mb-2">¿Eliminar PDF?</h3><p className="text-xs text-gray-400 leading-relaxed">Desaparecerá de la biblioteca.</p></div>
+                        </div>
+                        <div className="p-4 bg-black/40 border-t border-white/5 flex gap-3 mt-4">
+                            <button onClick={() => setShowDeleteModal(null)} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-gray-400 bg-panel hover:bg-white/5 transition-colors border border-white/5">No, Cancelar</button>
+                            <button onClick={handleDeletePdf} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-white bg-red-600 hover:bg-red-500 transition-colors shadow-lg shadow-red-500/20">Sí, Eliminar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+// ==========================================
 // 3. SIDEBAR IZQUIERDO
 // ==========================================
 const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
@@ -702,7 +819,7 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
         <div className="pt-4 pb-2 text-[9px] font-bold text-gray-600 uppercase px-4 tracking-widest">Multimedia</div>
         <Link to="/images" className={menuClass('/images')}><ImageIcon size={16}/> Imágenes</Link>
         <Link to="/videos" className={menuClass('/videos')}><Video size={16}/> Videos</Link>
-        <Link to="#" className={menuClass('/pdf')}><FileText size={16}/> Presentación PDF</Link>
+        <Link to="/pdf" className={menuClass('/pdf')}><FileText size={16}/> Presentación PDF</Link>
       </nav>
       
       <div className="flex-1 min-h-0 bg-black/20 border-t border-white/5 p-3 flex flex-col">
@@ -744,6 +861,7 @@ const DashboardLayout = () => {
   const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0, cantoId: null as number | null, tipo: 'texto', ruta: '', imgId: null as number | null, aspecto: 'contain', bucle: false });
   const [previewVerse, setPreviewVerse] = useState<any>(null);
   const [favorites, setFavorites] = useState<any[]>([]);
+  const [pdfPage, setPdfPage] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null); 
 
   const [chapterCache, setChapterCache] = useState<Record<string, any[]>>({});
@@ -760,6 +878,7 @@ const DashboardLayout = () => {
 
   const [centerMenu, setCenterMenu] = useState<{ x: number, y: number } | null>(null);
 
+  
   useEffect(() => {
     if (activeVersion && activeBookInfo.book && activeBookInfo.cap > 0 && activeBookInfo.tipo === 'texto') {
         loadChapter(activeVersion, activeBookInfo.book, activeBookInfo.cap);
@@ -932,8 +1051,42 @@ const DashboardLayout = () => {
 
         <div className="flex-1 overflow-y-auto p-10 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-sidebar via-mainbg to-mainbg scrollbar-thin relative" ref={scrollRef}>
           
-          {/* PANEL CENTRAL: VIDEOS */}
-          {activeBookInfo.tipo === 'video' ? (
+          {/* ---> AQUÍ AGREGAMOS EL PANEL CENTRAL DEL PDF <--- */}
+          {activeBookInfo.tipo === 'pdf' ? (
+              <div className="h-full flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 relative">
+                  <div className="w-full max-w-4xl h-[80vh] bg-black rounded-xl shadow-2xl overflow-hidden ring-1 ring-white/10 flex flex-col">
+                      <div className="bg-panel p-3 border-b border-white/10 flex items-center justify-between shrink-0">
+                          <span className="text-xs font-bold text-gray-300 uppercase flex items-center gap-2">
+                              <FileText size={14} className="text-red-400"/> {activeBookInfo.book}
+                          </span>
+                          
+                          {/* CONTROLES CON CACHÉ DE NAVEGACIÓN */}
+                          <div className="flex items-center gap-2 bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+                              <button onClick={() => {
+                                  const newPage = Math.max(1, pdfPage - 1);
+                                  setPdfPage(newPage);
+                                  projectVerse({ tipo: 'pdf', ruta: activeBookInfo.ruta, pagina: newPage });
+                              }} className="text-gray-400 hover:text-white hover:bg-white/10 p-1.5 rounded transition-colors"><ChevronLeft size={16}/></button>
+                              
+                              <span className="text-[11px] font-black w-24 text-center tracking-widest text-gray-200">PÁG. {pdfPage}</span>
+                              
+                              <button onClick={() => {
+                                  const newPage = pdfPage + 1;
+                                  setPdfPage(newPage);
+                                  projectVerse({ tipo: 'pdf', ruta: activeBookInfo.ruta, pagina: newPage });
+                              }} className="text-gray-400 hover:text-white hover:bg-white/10 p-1.5 rounded transition-colors"><ChevronRight size={16}/></button>
+                          </div>
+                          
+                          <button onClick={() => projectVerse({ tipo: 'pdf', ruta: activeBookInfo.ruta, pagina: pdfPage })} className="bg-accent text-white px-5 py-2 rounded shadow-lg text-xs font-black uppercase flex items-center gap-2 hover:bg-accent/80 transition-all active:scale-95">
+                              <MonitorPlay size={14}/> Sincronizar
+                          </button>
+                      </div>
+                      <iframe src={`${convertFileSrc(activeBookInfo.ruta)}#page=${pdfPage}&view=FitH&toolbar=0&navpanes=0`} className="w-full flex-1 border-none bg-black" />
+                  </div>
+              </div>
+
+          // PANEL CENTRAL: VIDEOS 
+          ) : activeBookInfo.tipo === 'video' ? (
               <div className="h-full flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 relative">
                   <div className="relative group w-full max-w-3xl aspect-video bg-black rounded-xl shadow-2xl overflow-hidden ring-1 ring-white/10">
                       <video src={convertFileSrc(activeBookInfo.ruta)} className="w-full h-full object-contain" controls controlsList="nodownload" loop={activeBookInfo.bucle} />
@@ -1037,6 +1190,16 @@ const DashboardLayout = () => {
                       onVideoDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false }); setPreviewVerse(null); } }}
                       onVideoLoopChanged={(imgId: number, newBucle: boolean) => { if (activeBookInfo.imgId === imgId) { setActiveBookInfo(prev => ({ ...prev, bucle: newBucle })); if (previewVerse?.ruta === activeBookInfo.ruta) projectVerse({ tipo: 'video', ruta: activeBookInfo.ruta, bucle: newBucle }); } }}
                   />} />
+
+                  <Route path="/pdf" element={<PdfLibrary 
+                      onSelectPdf={(doc: any) => { 
+                          setPdfPage(1); 
+                          setActiveBookInfo({ book: doc.nombre, cap: 0, cantoId: null, tipo: 'pdf', ruta: doc.ruta, imgId: doc.id, aspecto: 'contain', bucle: false }); 
+                          setPreviewVerse(null); 
+                          setCurrentChapter([]); 
+                      }}
+                      onPdfDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false }); setPreviewVerse(null); } }}
+                  />} />
                </Routes>
             </div>
         </div>
@@ -1064,6 +1227,11 @@ const DashboardLayout = () => {
                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 z-10">
                          <MonitorPlay size={24} className="text-accent animate-pulse"/>
                          <span className="text-[9px] font-black uppercase tracking-widest text-white">Video en Proyección</span>
+                     </div>
+                      ) : previewVerse?.tipo === 'pdf' ? (
+                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 z-10">
+                         <FileText size={24} className="text-red-400 animate-pulse"/>
+                         <span className="text-[9px] font-black uppercase tracking-widest text-white">PDF Pág. {previewVerse.pagina}</span>
                      </div>
                  ) : previewVerse ? (
                     previewVerse.tipo !== 'imagen' && (
