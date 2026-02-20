@@ -333,15 +333,41 @@ const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVers
     } else { setSuggestion(""); }
   };
 
-  const handleKeyDown = (e: any) => {
-    if ((e.key === 'ArrowRight' || e.key === 'Tab') && suggestion) { e.preventDefault(); setSearch(suggestion + " "); setSuggestion(""); }
+const handleKeyDown = (e: any) => {
+    // 1. Aplica el autocompletado si presiona Tab o Flecha Derecha
+    if ((e.key === 'ArrowRight' || e.key === 'Tab') && suggestion) { 
+        e.preventDefault(); 
+        setSearch(suggestion + " "); 
+        setSuggestion(""); 
+    }
+    
+    // 2. Ejecuta la búsqueda si presiona Enter
     if (e.key === 'Enter') {
         let rawBook = "", cap = 0, ver = 1;
+        // La expresión regular ya soporta espacios y dos puntos ("gen 1 1" o "gen 1:1")
         const match = search.match(/(.+?)\s+(\d+)(?:[:\s](\d+))?/);
-        if (match) { rawBook = match[1].trim(); cap = parseInt(match[2]); if(match[3]) ver = parseInt(match[3]); }
+        if (match) { 
+            rawBook = match[1].trim(); 
+            cap = parseInt(match[2]); 
+            if(match[3]) ver = parseInt(match[3]); 
+        }
+        
         if (rawBook) {
-            const realBook = books.find(b => normalizeText(b.nombre) === normalizeText(rawBook));
-            if (realBook) { onDirectSearch(currentVersion, realBook.nombre, cap, ver); setSearch(""); setSuggestion(""); }
+            const normRaw = normalizeText(rawBook); // Limpia tildes y pasa a minúsculas
+            
+            // BÚSQUEDA INTELIGENTE: 
+            // Primero busca si el usuario escribió el nombre completo sin tildes (ej: "genesis")
+            // Si no lo encuentra, busca si el libro "empieza con" lo escrito (ej: "gen")
+            const realBook = books.find(b => normalizeText(b.nombre) === normRaw) 
+                          || books.find(b => normalizeText(b.nombre).startsWith(normRaw));
+            
+            if (realBook) { 
+                // Envía al proyector el nombre oficial correcto (ej: "Génesis")
+                onDirectSearch(currentVersion, realBook.nombre, cap, ver); 
+                setSearch(""); 
+                setSuggestion(""); 
+                e.target.blur();
+            }
         }
     }
   };
@@ -667,7 +693,7 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
     <aside className="w-60 bg-sidebar border-r border-black/50 flex flex-col h-full shrink-0 z-20 shadow-xl">
       <div className="h-14 flex items-center px-4 border-b border-white/5 gap-2 shrink-0">
         <MonitorPlay size={20} className="text-accent" />
-        <span className="font-black text-sm tracking-tight text-gray-100">WORSHIP RS</span>
+        <span className="font-black text-sm tracking-tight text-gray-100">EASY PRESENTER</span>
       </div>
       
       <nav className="shrink-0 py-3 space-y-1">
