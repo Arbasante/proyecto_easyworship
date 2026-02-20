@@ -21,9 +21,9 @@ struct Diapositiva { id: i32, orden: i32, texto: String }
 #[derive(Serialize)]
 struct Imagen { id: i32, nombre: String, ruta: String, aspecto: String }
 
-// NUEVA ESTRUCTURA: Video
+// NUEVA ESTRUCTURA: Video (Añadido 'bucle')
 #[derive(Serialize)]
-struct Video { id: i32, nombre: String, ruta: String }
+struct Video { id: i32, nombre: String, ruta: String, bucle: bool }
 
 // --- ESTADO GLOBAL ---
 struct AppState {
@@ -126,20 +126,25 @@ fn update_image_aspect(id: i32, aspecto: String, state: State<AppState>) -> Resu
 }
 
 // ==========================================
-// NUEVO: COMANDOS DE VIDEOS
+// COMANDOS DE VIDEOS
 // ==========================================
 #[tauri::command]
 fn get_all_videos(state: State<AppState>) -> Result<Vec<Video>, String> {
     let conn = state.multimedia_db.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, nombre, ruta FROM videos ORDER BY id DESC").unwrap();
-    let iter = stmt.query_map([], |row| Ok(Video { id: row.get(0)?, nombre: row.get(1)?, ruta: row.get(2)? })).unwrap();
+    let mut stmt = conn.prepare("SELECT id, nombre, ruta, COALESCE(bucle, 0) FROM videos ORDER BY id DESC").unwrap();
+    let iter = stmt.query_map([], |row| Ok(Video { 
+        id: row.get(0)?, 
+        nombre: row.get(1)?, 
+        ruta: row.get(2)?,
+        bucle: row.get::<_, i32>(3)? != 0 // Convertir INTEGER (0/1) a bool
+    })).unwrap();
     Ok(iter.filter_map(Result::ok).collect())
 }
 
 #[tauri::command]
 fn add_video_db(nombre: String, ruta: String, state: State<AppState>) -> Result<(), String> {
     let conn = state.multimedia_db.lock().unwrap();
-    conn.execute("INSERT INTO videos (nombre, ruta) VALUES (?, ?)", params![nombre, ruta]).map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO videos (nombre, ruta, bucle) VALUES (?, ?, 0)", params![nombre, ruta]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -147,6 +152,15 @@ fn add_video_db(nombre: String, ruta: String, state: State<AppState>) -> Result<
 fn delete_video_db(id: i32, state: State<AppState>) -> Result<(), String> {
     let conn = state.multimedia_db.lock().unwrap();
     conn.execute("DELETE FROM videos WHERE id = ?", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// NUEVO COMANDO: Bucle de video
+#[tauri::command]
+fn update_video_loop(id: i32, bucle: bool, state: State<AppState>) -> Result<(), String> {
+    let conn = state.multimedia_db.lock().unwrap();
+    let b_val = if bucle { 1 } else { 0 };
+    conn.execute("UPDATE videos SET bucle = ? WHERE id = ?", params![b_val, id]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -253,11 +267,14 @@ fn setup_db(db_name: &str) -> Connection {
 
 fn setup_multimedia_db() -> Connection {
     let conn = setup_db("multimedia.db");
+    
+    // TABLA DE IMÁGENES
     conn.execute("CREATE TABLE IF NOT EXISTS imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, aspecto TEXT DEFAULT 'contain')", []).unwrap();
     let _ = conn.execute("ALTER TABLE imagenes ADD COLUMN aspecto TEXT DEFAULT 'contain'", []);
     
-    // NUEVA TABLA: VIDEOS
-    conn.execute("CREATE TABLE IF NOT EXISTS videos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL)", []).unwrap();
+    // TABLA DE VIDEOS (Agregada la columna de bucle)
+    conn.execute("CREATE TABLE IF NOT EXISTS videos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, bucle INTEGER DEFAULT 0)", []).unwrap();
+    let _ = conn.execute("ALTER TABLE videos ADD COLUMN bucle INTEGER DEFAULT 0", []);
     
     conn
 }
@@ -294,10 +311,10 @@ fn main() {
             add_image_db,
             delete_image_db,
             update_image_aspect,
-            // NUEVOS HANDLERS DE VIDEO
             get_all_videos,
             add_video_db,
             delete_video_db,
+            update_video_loop, // <--- Comando Registrado
             select_video_file,
             trigger_video_control
         ])

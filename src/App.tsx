@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
-import { Music, BookOpen, Image as ImageIcon, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, ChevronRight, Settings, Trash2, Palette, X, Plus, Edit2, AlertTriangle, Type, Maximize, Minimize, Play, Pause, RotateCcw } from "lucide-react";
+import { Music, BookOpen, Image as ImageIcon, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, ChevronRight, Settings, Trash2, Palette, X, Plus, Edit2, AlertTriangle, Type, Maximize, Minimize, Play, Pause, RotateCcw, Clapperboard } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -33,16 +33,16 @@ const ProjectorView = () => {
   const textRef = useRef<HTMLParagraphElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // NUEVO: Agregamos bgVideo al estado
   const [styles, setStyles] = useState({ 
-      biblia: { bgColor: '#000000', textColor: '#ffffff', bgImage: '' },
-      cantos: { bgColor: '#000000', textColor: '#ffffff', bgImage: '' }
+      biblia: { bgColor: '#000000', textColor: '#ffffff', bgImage: '', bgVideo: '' },
+      cantos: { bgColor: '#000000', textColor: '#ffffff', bgImage: '', bgVideo: '' }
   });
 
   useEffect(() => {
     const un1 = listen("update-proyeccion", (e: any) => setLiveVerse(e.payload));
     const un2 = listen("update-styles", (e: any) => setStyles(e.payload));
     
-    // ESCUCHADOR DE CONTROLES DE VIDEO REMOTOS
     const un3 = listen("video-control", (e: any) => {
         if (!videoRef.current) return;
         const action = e.payload;
@@ -60,9 +60,7 @@ const ProjectorView = () => {
   useEffect(() => {
     if (!liveVerse) return;
     setOpacity(0);
-    const timeout = setTimeout(() => {
-        setDisplayVerse(liveVerse);
-    }, 250);
+    const timeout = setTimeout(() => { setDisplayVerse(liveVerse); }, 250);
     return () => clearTimeout(timeout);
   }, [liveVerse]);
 
@@ -71,12 +69,9 @@ const ProjectorView = () => {
         if (displayVerse?.tipo === 'imagen' || displayVerse?.tipo === 'video') requestAnimationFrame(() => setOpacity(1));
         return;
     }
-
     const container = containerRef.current;
     const text = textRef.current;
-    let min = 20;  
-    let max = 300; 
-    let best = 20;
+    let min = 20; let max = 300; let best = 20;
 
     while (min <= max) {
         const mid = Math.floor((min + max) / 2);
@@ -91,7 +86,7 @@ const ProjectorView = () => {
     requestAnimationFrame(() => setOpacity(1));
   }, [displayVerse]);
 
-  // RENDER: VIDEO
+  // RENDER: VIDEO MULTIMEDIA
   if (displayVerse?.tipo === 'video') {
       return (
           <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
@@ -100,13 +95,13 @@ const ProjectorView = () => {
                   src={convertFileSrc(displayVerse.ruta)} 
                   className="w-full h-full object-contain" 
                   autoPlay 
-                  loop={false}
+                  loop={displayVerse.bucle} // <--- APLICAMOS EL BUCLE
               />
           </div>
       );
   }
 
-  // RENDER: IMAGEN
+  // RENDER: IMAGEN MULTIMEDIA
   if (displayVerse?.tipo === 'imagen') {
       const fitClass = displayVerse.aspecto === 'cover' ? 'w-full h-full object-cover' : displayVerse.aspecto === 'fill' ? 'w-full h-full object-fill' : 'max-w-full max-h-full object-contain'; 
       return (
@@ -116,19 +111,20 @@ const ProjectorView = () => {
       );
   }
 
-  // RENDER: TEXTO
+  // RENDER: TEXTO CON FONDO (IMAGEN O VIDEO)
   const isCanto = displayVerse?.capitulo === 0;
   const currentStyle = isCanto ? styles.cantos : styles.biblia;
-  const containerStyle: any = {
-      backgroundColor: currentStyle?.bgColor || '#000', color: currentStyle?.textColor || '#fff',
-      backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat'
-  };
-  if (currentStyle?.bgImage) containerStyle.backgroundImage = `url('${convertFileSrc(currentStyle.bgImage)}')`;
-
+  
   return (
-    <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden bg-cover bg-center transition-all duration-500" style={containerStyle}>
+    <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden transition-all duration-500 relative" style={{ backgroundColor: currentStyle?.bgColor || '#000', color: currentStyle?.textColor || '#fff' }}>
+      
+      {/* CAPA DE FONDO: Imagen o Video */}
+      {currentStyle?.bgImage && <img src={convertFileSrc(currentStyle.bgImage)} className="absolute inset-0 w-full h-full object-cover z-0" />}
+      {currentStyle?.bgVideo && <video src={convertFileSrc(currentStyle.bgVideo)} autoPlay loop muted className="absolute inset-0 w-full h-full object-cover z-0" />}
+      
+      {/* CAPA DE TEXTO */}
       {displayVerse && (
-        <div className="w-full h-full flex flex-col justify-between transition-opacity duration-300 px-8 py-8" style={{ opacity }}>
+        <div className="w-full h-full flex flex-col justify-between transition-opacity duration-300 px-8 py-8 relative z-10" style={{ opacity }}>
           <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
             <p ref={textRef} style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} className="font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line drop-shadow-md">
                 {isCanto ? displayVerse.texto : `"${displayVerse.texto}"`}
@@ -162,20 +158,16 @@ const CantoEditorModal = ({ isEdit, initialData, onClose, onSave }: any) => {
                     <h2 className="text-sm font-black uppercase text-accent tracking-widest flex items-center gap-2">
                         {isEdit ? <><Edit2 size={16}/> Editar Canto</> : <><Plus size={16}/> Nuevo Canto</>}
                     </h2>
-                    <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
-                        <X size={18}/>
-                    </button>
+                    <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors"><X size={18}/></button>
                 </div>
                 <div className="p-6 flex flex-col gap-4 overflow-y-auto flex-1">
                     <div>
                         <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">Título del Canto</label>
-                        <input type="text" value={formData.titulo} onChange={(e) => setFormData({...formData, titulo: e.target.value})} placeholder="Ej: Cuan Grande es Él"
-                            className="w-full bg-panel border border-white/10 rounded-lg p-3 text-sm focus:border-accent outline-none font-bold text-white shadow-inner" />
+                        <input type="text" value={formData.titulo} onChange={(e) => setFormData({...formData, titulo: e.target.value})} placeholder="Ej: Cuan Grande es Él" className="w-full bg-panel border border-white/10 rounded-lg p-3 text-sm focus:border-accent outline-none font-bold text-white shadow-inner" />
                     </div>
                     <div className="flex-1 flex flex-col">
                         <label className="text-[10px] font-black uppercase text-gray-500 mb-1 block">Letra</label>
-                        <textarea value={formData.letra} onChange={(e) => setFormData({...formData, letra: e.target.value})} placeholder="Señor mi Dios..."
-                            className="w-full flex-1 bg-panel border border-white/10 rounded-lg p-4 text-sm focus:border-accent outline-none text-gray-300 shadow-inner min-h-[300px] resize-none custom-scrollbar leading-relaxed" />
+                        <textarea value={formData.letra} onChange={(e) => setFormData({...formData, letra: e.target.value})} placeholder="Señor mi Dios..." className="w-full flex-1 bg-panel border border-white/10 rounded-lg p-4 text-sm focus:border-accent outline-none text-gray-300 shadow-inner min-h-[300px] resize-none custom-scrollbar leading-relaxed" />
                     </div>
                 </div>
                 <div className="p-4 bg-black/40 border-t border-white/5 flex justify-end gap-3">
@@ -222,8 +214,7 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
     };
 
     const handleBgContextMenu = (e: React.MouseEvent) => {
-        e.preventDefault();
-        let x = e.clientX; let y = e.clientY;
+        e.preventDefault(); let x = e.clientX; let y = e.clientY;
         if (window.innerHeight - y < 100) y -= 100;
         setContextMenu({ x, y, canto: null });
     };
@@ -231,8 +222,7 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
     const closeContextMenu = () => setContextMenu(null);
     const openAddModal = () => { setShowAddModal(true); closeContextMenu(); };
     const openEditModal = async () => {
-        const canto = contextMenu?.canto;
-        closeContextMenu();
+        const canto = contextMenu?.canto; closeContextMenu();
         if (!canto) return;
         const slides: any = await invoke("get_canto_diapositivas", { cantoId: canto.id });
         const letraCompleta = slides.map((s: any) => s.texto).join('\n\n');
@@ -259,16 +249,14 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
       <div className="flex flex-col h-full p-3 select-none bg-sidebar/30 relative" onContextMenu={handleBgContextMenu}>
         <div className="mb-3 relative group">
            <Search className="absolute left-2 top-2.5 text-gray-500 group-focus-within:text-accent transition-colors" size={12} />
-           <input type="text" placeholder="Buscar canto..." value={search} onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-panel border border-white/10 rounded py-2 pl-8 pr-2 text-[10px] focus:border-accent outline-none font-medium placeholder:text-gray-600 shadow-inner" />
+           <input type="text" placeholder="Buscar canto..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-panel border border-white/10 rounded py-2 pl-8 pr-2 text-[10px] focus:border-accent outline-none font-medium placeholder:text-gray-600 shadow-inner" />
         </div>
         <div className="flex-1 overflow-y-auto bg-black/40 rounded-lg border border-white/5 p-2 scrollbar-thin">
            <div className="grid grid-cols-1 gap-0.5">
               {filteredCantos.length > 0 ? filteredCantos.map(c => {
                  const isFav = favorites.some((f: any) => f.cantoId === c.id);
                  return (
-                 <div key={c.id} onClick={() => onSelectCanto(c)} onContextMenu={(e) => handleSongContextMenu(e, c)}
-                      className="p-2 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex justify-between items-center group cursor-pointer transition-all border-b border-white/5">
+                 <div key={c.id} onClick={() => onSelectCanto(c)} onContextMenu={(e) => handleSongContextMenu(e, c)} className="p-2 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex justify-between items-center group cursor-pointer transition-all border-b border-white/5">
                     <span className="font-bold text-gray-200 group-hover:text-accent truncate pr-2">{c.titulo}</span>
                     <button onClick={(e) => toggleFavCanto(e, c)} className={`transition-all hover:scale-110 ${isFav ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                        <Star size={14} className={isFav ? "text-yellow-500" : "text-gray-500 hover:text-yellow-500"} fill={isFav ? "currentColor" : "none"} />
@@ -315,7 +303,7 @@ const CantosLibrary = ({ onSelectCanto, favorites, setFavorites, onCantoUpdated,
 };
 
 // ==========================================
-// 2B. BIBLIOTECA DE BIBLIAS (OMITIDA BREVEMENTE POR ESPACIO, SE MANTIENE IGUAL)
+// 2B. BIBLIOTECA DE BIBLIAS
 // ==========================================
 const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVersionChange }: any) => {
   const [versions, setVersions] = useState<string[]>([]);
@@ -525,12 +513,13 @@ const ImagesLibrary = ({ onSelectImage, onProjectImage, onImageDeleted, onImageA
 };
 
 // ==========================================
-// NUEVO: 2D. BIBLIOTECA DE VIDEOS (ALTO RENDIMIENTO)
+// 2D. BIBLIOTECA DE VIDEOS (NUEVO CON BUCLE)
 // ==========================================
-const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted }: any) => {
+const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted, onVideoLoopChanged }: any) => {
     const [videos, setVideos] = useState<any[]>([]);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, video: any | null } | null>(null);
     const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
+    const [showLoopSubMenu, setShowLoopSubMenu] = useState(false);
 
     const loadVideos = () => { invoke("get_all_videos").then((data: any) => setVideos(data)); };
     useEffect(() => { loadVideos(); }, []);
@@ -539,15 +528,18 @@ const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted }: any) =
         e.preventDefault(); let x = e.clientX; let y = e.clientY;
         if (window.innerHeight - y < 100) y -= 100;
         setContextMenu({ x, y, video: null });
+        setShowLoopSubMenu(false);
     };
 
     const handleItemContextMenu = (e: React.MouseEvent, vid: any) => {
         e.preventDefault(); e.stopPropagation(); let x = e.clientX; let y = e.clientY;
         if (window.innerHeight - y < 150) y -= 150; 
+        if (window.innerWidth - x < 250) x -= 250;  
         setContextMenu({ x, y, video: vid });
+        setShowLoopSubMenu(false);
     };
 
-    const closeContextMenu = () => setContextMenu(null);
+    const closeContextMenu = () => { setContextMenu(null); setShowLoopSubMenu(false); };
 
     const handleAddVideo = async () => {
         closeContextMenu();
@@ -569,6 +561,16 @@ const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted }: any) =
         setShowDeleteModal(null); loadVideos();
     };
 
+    const handleLoopChange = async (isLoop: boolean) => {
+        if (!contextMenu?.video) return;
+        const vidId = contextMenu.video.id;
+        
+        await invoke("update_video_loop", { id: vidId, bucle: isLoop });
+        setVideos(prev => prev.map(vid => vid.id === vidId ? { ...vid, bucle: isLoop } : vid));
+        if (onVideoLoopChanged) onVideoLoopChanged(vidId, isLoop);
+        closeContextMenu();
+    };
+
     return (
         <div className="flex flex-col h-full p-3 select-none bg-sidebar/30 relative" onContextMenu={handleBgContextMenu}>
             <div className="flex-1 overflow-y-auto bg-black/40 rounded-lg border border-white/5 p-2 scrollbar-thin relative">
@@ -581,13 +583,15 @@ const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted }: any) =
                     <div className="grid grid-cols-1 gap-1">
                         {videos.map(vid => (
                             <div key={vid.id} onClick={() => onSelectVideo(vid)} onDoubleClick={() => onProjectVideo(vid)} onContextMenu={(e) => handleItemContextMenu(e, vid)}
-                                 className="p-1 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex items-center gap-3 group cursor-pointer transition-all border border-transparent hover:border-white/10">
-                                {/* OPTIMIZACIÓN MAGISTRAL: "#t=0.1" extrae el primer frame usando la GPU nativa, sin usar memoria extra, y preload=metadata evita ahogar la RAM */}
+                                 className="p-1 text-[11px] text-gray-400 hover:bg-accent/20 hover:text-white rounded flex items-center gap-3 group cursor-pointer transition-all border border-transparent hover:border-white/10 relative">
                                 <div className="w-16 h-10 bg-black rounded shadow-sm overflow-hidden relative flex items-center justify-center">
                                     <video src={`${convertFileSrc(vid.ruta)}#t=0.1`} className="w-full h-full object-cover opacity-80" preload="metadata" />
                                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40"><Play size={12} className="text-white"/></div>
                                 </div>
-                                <span className="font-bold text-gray-300 group-hover:text-accent truncate flex-1 leading-tight">{vid.nombre}</span>
+                                <div className="flex-1 flex flex-col overflow-hidden">
+                                    <span className="font-bold text-gray-300 group-hover:text-accent truncate leading-tight">{vid.nombre}</span>
+                                    {vid.bucle && <span className="text-[8px] font-black text-accent/60 uppercase">Bucle Activado</span>}
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -601,6 +605,20 @@ const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted }: any) =
                         <button onClick={handleAddVideo} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center gap-2"><Plus size={12}/> Agregar Video</button>
                         {contextMenu.video && (
                             <>
+                                <div className="h-px bg-white/5 my-1 mx-2"></div>
+                                <div className="relative group/loop">
+                                    <button onClick={(e) => { e.stopPropagation(); setShowLoopSubMenu(!showLoopSubMenu); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent flex items-center justify-between">
+                                        <div className="flex items-center gap-2"><RotateCcw size={12}/> Reproducción</div>
+                                        <ChevronRight size={12} className={showLoopSubMenu ? "text-accent" : ""} />
+                                    </button>
+                                    {showLoopSubMenu && (
+                                        <div className="absolute top-0 left-[98%] bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-48 animate-in slide-in-from-left-2 duration-150 z-50">
+                                            <button onClick={() => handleLoopChange(false)} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${!contextMenu.video.bucle ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>Normal (Una vez)</button>
+                                            <button onClick={() => handleLoopChange(true)} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.video.bucle ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>Bucle Infinito</button>
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="h-px bg-white/5 my-1 mx-2"></div>
                                 <button onClick={() => { setShowDeleteModal(contextMenu.video); closeContextMenu(); }} className="w-full text-left px-4 py-2 text-[11px] font-bold text-red-400 hover:bg-red-500/20 hover:text-red-500 flex items-center gap-2"><Trash2 size={12}/> Eliminar Video</button>
                             </>
@@ -626,7 +644,6 @@ const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted }: any) =
         </div>
     );
 };
-
 
 // ==========================================
 // 3. SIDEBAR IZQUIERDO
@@ -687,7 +704,8 @@ const DashboardLayout = () => {
   const [currentChapter, setCurrentChapter] = useState<any[]>([]);
   const [activeVersion, setActiveVersion] = useState("");
   
-  const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0, cantoId: null as number | null, tipo: 'texto', ruta: '', imgId: null as number | null, aspecto: 'contain' });
+  // Agregamos bucle a activeBookInfo
+  const [activeBookInfo, setActiveBookInfo] = useState({ book: "", cap: 0, cantoId: null as number | null, tipo: 'texto', ruta: '', imgId: null as number | null, aspecto: 'contain', bucle: false });
   const [previewVerse, setPreviewVerse] = useState<any>(null);
   const [favorites, setFavorites] = useState<any[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null); 
@@ -695,8 +713,9 @@ const DashboardLayout = () => {
   const [chapterCache, setChapterCache] = useState<Record<string, any[]>>({});
   const [cantoCache, setCantoCache] = useState<Record<number, any[]>>({});
 
-  const [bibleStyles, setBibleStyles] = useState({ bgColor: '#000000', textColor: '#ffffff', bgImage: '' });
-  const [cantoStyles, setCantoStyles] = useState({ bgColor: '#000000', textColor: '#ffffff', bgImage: '' });
+  // Estilos de fondo actualizados para contener video
+  const [bibleStyles, setBibleStyles] = useState({ bgColor: '#000000', textColor: '#ffffff', bgImage: '', bgVideo: '' });
+  const [cantoStyles, setCantoStyles] = useState({ bgColor: '#000000', textColor: '#ffffff', bgImage: '', bgVideo: '' });
   
   const [styleTab, setStyleTab] = useState<'biblia' | 'cantos'>('biblia');
   const [showStyleModal, setShowStyleModal] = useState(false);
@@ -730,21 +749,21 @@ const DashboardLayout = () => {
     const cacheKey = `${version}-${book}-${cap}`;
     if (chapterCache[cacheKey]) {
         setCurrentChapter(chapterCache[cacheKey]);
-        setActiveBookInfo({ book, cap, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
+        setActiveBookInfo({ book, cap, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false });
         return;
     }
 
     invoke("get_chapter_verses", { version, book, cap }).then((verses: any) => {
       setChapterCache(prev => ({ ...prev, [cacheKey]: verses })); 
       setCurrentChapter(verses);
-      setActiveBookInfo({ book, cap, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
+      setActiveBookInfo({ book, cap, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false });
     });
   };
 
   const loadCanto = (canto: any) => {
     if (cantoCache[canto.id]) {
         setCurrentChapter(cantoCache[canto.id]);
-        setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
+        setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false });
         return;
     }
 
@@ -752,7 +771,7 @@ const DashboardLayout = () => {
       const formattedSlides = slides.map((s: any) => ({ libro: canto.titulo, capitulo: 0, versiculo: s.orden, texto: s.texto, versionName: "CANTO" }));
       setCantoCache(prev => ({ ...prev, [canto.id]: formattedSlides })); 
       setCurrentChapter(formattedSlides);
-      setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' }); 
+      setActiveBookInfo({ book: canto.titulo, cap: 0, cantoId: canto.id, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false }); 
     }).catch(err => console.error("Error cargando canto:", err));
   };
 
@@ -791,7 +810,7 @@ const DashboardLayout = () => {
 
   const handleCantoDeleted = (id: number) => {
       if (activeBookInfo.cantoId === id) {
-          setCurrentChapter([]); setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' });
+          setCurrentChapter([]); setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false });
       }
   };
 
@@ -808,10 +827,17 @@ const DashboardLayout = () => {
     let updatedBiblia = bibleStyles; let updatedCantos = cantoStyles;
     if (styleTab === 'biblia') {
         updatedBiblia = { ...bibleStyles, ...newS };
-        if (newS.bgColor && !newS.bgImage) updatedBiblia.bgImage = ""; setBibleStyles(updatedBiblia);
+        // Si suben video, limpiamos imagen. Si suben imagen, limpiamos video
+        if (newS.bgImage) updatedBiblia.bgVideo = "";
+        if (newS.bgVideo) updatedBiblia.bgImage = "";
+        if (newS.bgColor && !newS.bgImage && !newS.bgVideo) { updatedBiblia.bgImage = ""; updatedBiblia.bgVideo = ""; }
+        setBibleStyles(updatedBiblia);
     } else {
         updatedCantos = { ...cantoStyles, ...newS };
-        if (newS.bgColor && !newS.bgImage) updatedCantos.bgImage = ""; setCantoStyles(updatedCantos);
+        if (newS.bgImage) updatedCantos.bgVideo = "";
+        if (newS.bgVideo) updatedCantos.bgImage = "";
+        if (newS.bgColor && !newS.bgImage && !newS.bgVideo) { updatedCantos.bgImage = ""; updatedCantos.bgVideo = ""; }
+        setCantoStyles(updatedCantos);
     }
     invoke("trigger_style_update", { styles: { biblia: updatedBiblia, cantos: updatedCantos } });
   };
@@ -825,6 +851,27 @@ const DashboardLayout = () => {
             updateStyles({ bgImage: pStr, bgColor: 'transparent' });
         }
     } catch (error) { console.error("Error seleccionando imagen:", error); }
+  };
+
+  // NUEVO: Verificación de límite de 60 segundos
+  const handleBgVideoUpload = async () => {
+      try {
+          const path = await invoke("select_video_file");
+          if (path) {
+              const videoStr = path as string;
+              // Creamos un elemento de video en memoria temporal
+              const videoEl = document.createElement('video');
+              videoEl.src = convertFileSrc(videoStr);
+              videoEl.onloadedmetadata = () => {
+                  if (videoEl.duration > 60) {
+                      alert("⚠️ Por rendimiento y optimización, los videos de fondo no pueden durar más de 60 segundos.");
+                  } else {
+                      if (!recentImages.includes(videoStr)) setRecentImages([...recentImages, videoStr]);
+                      updateStyles({ bgVideo: videoStr, bgColor: 'transparent' });
+                  }
+              };
+          }
+      } catch (error) { console.error("Error seleccionando video de fondo:", error); }
   };
 
   const isPreviewCanto = previewVerse?.capitulo === 0;
@@ -852,41 +899,25 @@ const DashboardLayout = () => {
           {/* PANEL CENTRAL: VIDEOS */}
           {activeBookInfo.tipo === 'video' ? (
               <div className="h-full flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 relative">
-                  
-                  {/* Contenedor del video local */}
                   <div className="relative group w-full max-w-3xl aspect-video bg-black rounded-xl shadow-2xl overflow-hidden ring-1 ring-white/10">
-                      <video 
-                          src={convertFileSrc(activeBookInfo.ruta)} 
-                          className="w-full h-full object-contain"
-                          controls
-                          controlsList="nodownload"
-                      />
-                      {/* Botón rápido para enviar al proyector (Doble seguridad por si no quiere dar doble clic a la miniatura) */}
+                      <video src={convertFileSrc(activeBookInfo.ruta)} className="w-full h-full object-contain" controls controlsList="nodownload" loop={activeBookInfo.bucle} />
                       {previewVerse?.ruta !== activeBookInfo.ruta && (
                           <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => projectVerse({ tipo: 'video', ruta: activeBookInfo.ruta })} className="bg-accent text-white px-4 py-2 rounded shadow-lg text-xs font-bold uppercase flex items-center gap-2 hover:bg-accent/80">
+                              <button onClick={() => projectVerse({ tipo: 'video', ruta: activeBookInfo.ruta, bucle: activeBookInfo.bucle })} className="bg-accent text-white px-4 py-2 rounded shadow-lg text-xs font-bold uppercase flex items-center gap-2 hover:bg-accent/80">
                                   <MonitorPlay size={14}/> Proyectar Video
                               </button>
                           </div>
                       )}
                   </div>
-
-                  {/* CONTROLES REMOTOS (Solo aparecen si este video está siendo proyectado actualmente) */}
                   {previewVerse?.ruta === activeBookInfo.ruta && (
                       <div className="mt-8 bg-sidebar border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col items-center animate-in slide-in-from-bottom-4">
                           <div className="flex items-center gap-2 text-accent font-black uppercase text-xs tracking-widest mb-4">
-                              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Video en Vivo
+                              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Video en Vivo {activeBookInfo.bucle && "(Bucle Activado)"}
                           </div>
                           <div className="flex gap-4">
-                              <button onClick={() => emitVideoControl('play')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10">
-                                  <Play size={16} className="text-green-400"/> Reproducir
-                              </button>
-                              <button onClick={() => emitVideoControl('pause')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10">
-                                  <Pause size={16} className="text-yellow-400"/> Pausar
-                              </button>
-                              <button onClick={() => emitVideoControl('restart')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10">
-                                  <RotateCcw size={16} className="text-blue-400"/> Reiniciar
-                              </button>
+                              <button onClick={() => emitVideoControl('play')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10"><Play size={16} className="text-green-400"/> Reproducir</button>
+                              <button onClick={() => emitVideoControl('pause')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10"><Pause size={16} className="text-yellow-400"/> Pausar</button>
+                              <button onClick={() => emitVideoControl('restart')} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white px-6 py-3 rounded-xl transition-all active:scale-95 font-bold text-[11px] uppercase border border-white/10"><RotateCcw size={16} className="text-blue-400"/> Reiniciar</button>
                           </div>
                       </div>
                   )}
@@ -958,16 +989,17 @@ const DashboardLayout = () => {
                   <Route path="/bibles" element={<BiblesLibrary currentVersion={activeVersion} onVersionChange={setActiveVersion} onSelectChapter={loadChapter} onDirectSearch={(v:any, b:any, c:any, vr:any) => invoke("get_single_verse", {version:v,book:b,cap:c,ver:vr}).then((r:any)=>r&&projectVerse(r))} />} />
                   
                   <Route path="/images" element={<ImagesLibrary 
-                      onSelectImage={(img: any) => { setActiveBookInfo({ book: img.nombre, cap: 0, cantoId: null, tipo: 'imagen', ruta: img.ruta, imgId: img.id, aspecto: img.aspecto }); setPreviewVerse(null); setCurrentChapter([]); }}
+                      onSelectImage={(img: any) => { setActiveBookInfo({ book: img.nombre, cap: 0, cantoId: null, tipo: 'imagen', ruta: img.ruta, imgId: img.id, aspecto: img.aspecto, bucle: false }); setPreviewVerse(null); setCurrentChapter([]); }}
                       onProjectImage={(img: any) => projectVerse({ tipo: 'imagen', ruta: img.ruta, aspecto: img.aspecto })}
-                      onImageDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' }); setPreviewVerse(null); } }}
+                      onImageDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false }); setPreviewVerse(null); } }}
                       onImageAspectChanged={(imgId: number, newAspecto: string) => { if (activeBookInfo.imgId === imgId) { setActiveBookInfo(prev => ({ ...prev, aspecto: newAspecto })); if (previewVerse?.ruta === activeBookInfo.ruta) projectVerse({ tipo: 'imagen', ruta: activeBookInfo.ruta, aspecto: newAspecto }); } }}
                   />} />
 
                   <Route path="/videos" element={<VideosLibrary 
-                      onSelectVideo={(vid: any) => { setActiveBookInfo({ book: vid.nombre, cap: 0, cantoId: null, tipo: 'video', ruta: vid.ruta, imgId: vid.id, aspecto: 'contain' }); setPreviewVerse(null); setCurrentChapter([]); }}
-                      onProjectVideo={(vid: any) => projectVerse({ tipo: 'video', ruta: vid.ruta })}
-                      onVideoDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain' }); setPreviewVerse(null); } }}
+                      onSelectVideo={(vid: any) => { setActiveBookInfo({ book: vid.nombre, cap: 0, cantoId: null, tipo: 'video', ruta: vid.ruta, imgId: vid.id, aspecto: 'contain', bucle: vid.bucle }); setPreviewVerse(null); setCurrentChapter([]); }}
+                      onProjectVideo={(vid: any) => projectVerse({ tipo: 'video', ruta: vid.ruta, bucle: vid.bucle })}
+                      onVideoDeleted={(ruta: string) => { if (activeBookInfo.ruta === ruta) { setActiveBookInfo({ book: "", cap: 0, cantoId: null, tipo: 'texto', ruta: '', imgId: null, aspecto: 'contain', bucle: false }); setPreviewVerse(null); } }}
+                      onVideoLoopChanged={(imgId: number, newBucle: boolean) => { if (activeBookInfo.imgId === imgId) { setActiveBookInfo(prev => ({ ...prev, bucle: newBucle })); if (previewVerse?.ruta === activeBookInfo.ruta) projectVerse({ tipo: 'video', ruta: activeBookInfo.ruta, bucle: newBucle }); } }}
                   />} />
                </Routes>
             </div>
@@ -987,19 +1019,24 @@ const DashboardLayout = () => {
                     backgroundSize: previewVerse?.tipo === 'imagen' && previewVerse.aspecto === 'contain' ? 'contain' : (previewVerse?.tipo === 'imagen' && previewVerse.aspecto === 'fill' ? '100% 100%' : 'cover')
                  }}>
                  
+                 {/* Preview de Video de Fondo */}
+                 {activeStyles.bgVideo && !previewVerse?.tipo && (
+                     <video src={convertFileSrc(activeStyles.bgVideo)} autoPlay loop muted className="absolute inset-0 w-full h-full object-cover opacity-50 z-0" />
+                 )}
+
                  {previewVerse?.tipo === 'video' ? (
-                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80">
+                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 z-10">
                          <MonitorPlay size={24} className="text-accent animate-pulse"/>
                          <span className="text-[9px] font-black uppercase tracking-widest text-white">Video en Proyección</span>
                      </div>
                  ) : previewVerse ? (
                     previewVerse.tipo !== 'imagen' && (
-                        <div className="p-3 text-center w-full drop-shadow-md">
+                        <div className="p-3 text-center w-full drop-shadow-md z-10">
                             <p className="text-[10px] font-bold line-clamp-3 leading-tight" style={{ color: activeStyles.textColor }}>{isPreviewCanto ? previewVerse.texto : `"${previewVerse.texto}"`}</p>
                         </div>
                     )
                  ) : (
-                    <span className="text-[10px] opacity-20 uppercase font-black">Monitor</span>
+                    <span className="text-[10px] opacity-20 uppercase font-black z-10">Monitor</span>
                  )}
             </div>
 
@@ -1028,20 +1065,34 @@ const DashboardLayout = () => {
                     <div>
                         <p className="text-[9px] font-black uppercase text-gray-500 mb-3 flex items-center gap-1"><ImageIcon size={10}/> Fondo Actual: {styleTab}</p>
                         <div className="grid grid-cols-4 gap-3 mb-4">
-                            <div onClick={() => updateStyles({ bgColor: '#000000', bgImage: '' })} className={`aspect-video rounded-lg bg-black border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#000000' && !currentModalStyles.bgImage ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}><span className="text-[8px] text-gray-700 font-bold">NEGRO</span></div>
-                            <div onClick={() => updateStyles({ bgColor: '#ffffff', bgImage: '' })} className={`aspect-video rounded-lg bg-white border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#ffffff' && !currentModalStyles.bgImage ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}><span className="text-[8px] text-gray-300 font-bold">BLANCO</span></div>
-                            <div onClick={handleBgImageUpload} className="aspect-video rounded-lg bg-panel border border-dashed border-white/20 cursor-pointer flex flex-col items-center justify-center gap-1 hover:bg-white/5 hover:border-accent text-gray-500 hover:text-accent transition-all"><Plus size={14} /><span className="text-[8px] font-bold">AGREGAR</span></div>
+                            <div onClick={() => updateStyles({ bgColor: '#000000', bgImage: '', bgVideo: '' })} className={`aspect-video rounded-lg bg-black border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#000000' && !currentModalStyles.bgImage && !currentModalStyles.bgVideo ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}><span className="text-[8px] text-gray-700 font-bold">NEGRO</span></div>
+                            <div onClick={() => updateStyles({ bgColor: '#ffffff', bgImage: '', bgVideo: '' })} className={`aspect-video rounded-lg bg-white border cursor-pointer flex items-center justify-center ${currentModalStyles.bgColor==='#ffffff' && !currentModalStyles.bgImage && !currentModalStyles.bgVideo ? 'border-accent ring-1 ring-accent' : 'border-white/20 hover:border-white/50'}`}><span className="text-[8px] text-gray-300 font-bold">BLANCO</span></div>
+                            <div onClick={handleBgImageUpload} className="aspect-video rounded-lg bg-panel border border-dashed border-white/20 cursor-pointer flex flex-col items-center justify-center gap-1 hover:bg-white/5 hover:border-accent text-gray-500 hover:text-accent transition-all"><ImageIcon size={14} /><span className="text-[8px] font-bold">IMAGEN</span></div>
+                            
+                            {/* BOTÓN AGREGAR VIDEO CON BUCLE (Limita a 60 seg) */}
+                            <div onClick={handleBgVideoUpload} className="aspect-video rounded-lg bg-panel border border-dashed border-white/20 cursor-pointer flex flex-col items-center justify-center gap-1 hover:bg-white/5 hover:border-accent text-gray-500 hover:text-accent transition-all">
+                                <Clapperboard size={14} />
+                                <span className="text-[8px] font-bold">VIDEO</span>
+                            </div>
                         </div>
 
                         {recentImages.length > 0 && (
                             <div>
-                                <p className="text-[8px] font-bold text-gray-600 mb-2 uppercase">Galería</p>
+                                <p className="text-[8px] font-bold text-gray-600 mb-2 uppercase">Galería (Imágenes y Videos)</p>
                                 <div className="grid grid-cols-4 gap-3">
-                                    {recentImages.map((img, idx) => (
-                                        <div key={idx} onClick={() => updateStyles({ bgImage: img, bgColor: 'transparent' })} className={`aspect-video rounded-lg border cursor-pointer bg-cover bg-center relative group ${currentModalStyles.bgImage === img ? 'border-accent ring-1 ring-accent' : 'border-white/10 hover:border-white/40'}`} style={{ backgroundImage: `url('${convertFileSrc(img)}')` }}>
-                                             <button onClick={(e) => {e.stopPropagation(); setRecentImages(recentImages.filter(i => i !== img))}} className="absolute top-1 right-1 bg-black/50 text-white p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500"><X size={8}/></button>
-                                        </div>
-                                    ))}
+                                    {recentImages.map((file, idx) => {
+                                        const isVideo = file.match(/\.(mp4|webm|mov|mkv)$/i);
+                                        return (
+                                            <div key={idx} onClick={() => isVideo ? updateStyles({ bgVideo: file, bgImage: '', bgColor: 'transparent' }) : updateStyles({ bgImage: file, bgVideo: '', bgColor: 'transparent' })} 
+                                                 className={`aspect-video rounded-lg border cursor-pointer bg-cover bg-center relative group overflow-hidden ${currentModalStyles.bgImage === file || currentModalStyles.bgVideo === file ? 'border-accent ring-1 ring-accent' : 'border-white/10 hover:border-white/40'}`} 
+                                                 style={!isVideo ? { backgroundImage: `url('${convertFileSrc(file)}')` } : {}}>
+                                                 
+                                                 {isVideo && <video src={`${convertFileSrc(file)}#t=0.1`} className="absolute inset-0 w-full h-full object-cover" preload="metadata" />}
+                                                 
+                                                 <button onClick={(e) => {e.stopPropagation(); setRecentImages(recentImages.filter(i => i !== file))}} className="absolute top-1 right-1 bg-black/50 text-white p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500 z-10"><X size={8}/></button>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}
