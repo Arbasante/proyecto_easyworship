@@ -3,8 +3,10 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use std::fs; // Necesario para copiar archivos
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use std::fs;
+use std::path::PathBuf;
+use tauri::path::BaseDirectory;
 
 // --- ESTRUCTURAS ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -22,6 +24,7 @@ struct Diapositiva { id: i32, orden: i32, texto: String }
 #[derive(Serialize)]
 struct Imagen { id: i32, nombre: String, ruta: String, aspecto: String }
 
+// NUEVA ESTRUCTURA: Video (Añadido 'bucle')
 #[derive(Serialize)]
 struct Video { id: i32, nombre: String, ruta: String, bucle: bool }
 
@@ -33,9 +36,6 @@ struct CantoExport {
     letras: Vec<String>,
 }
 
-#[derive(Serialize)]
-struct PdfDoc { id: i32, nombre: String, ruta: String }
-
 // --- ESTADO GLOBAL ---
 struct AppState {
     cantos_db: Mutex<Connection>,
@@ -44,46 +44,8 @@ struct AppState {
 }
 
 // ==========================================
-// LÓGICA DE CONEXIÓN TODOTERRENO (Windows/Linux)
+// COMANDOS DE CANTOS
 // ==========================================
-fn get_db_connection(app: &tauri::AppHandle, db_name: &str) -> Connection {
-    // 1. Ruta de origen (Donde se instaló el programa - Solo Lectura)
-    let resource_path = app.path().resolve(db_name, tauri::path::BaseDirectory::Resource)
-        .expect("No se encontró el archivo base en los recursos");
-
-    // 2. Ruta de destino (AppData en Windows / .local/share en Linux - Lectura y Escritura)
-    let app_data_dir = app.path().app_data_dir().expect("No se pudo determinar la carpeta de datos");
-    
-    // Crear carpeta si no existe
-    if !app_data_dir.exists() {
-        fs::create_dir_all(&app_data_dir).expect("No se pudo crear la carpeta de datos");
-    }
-
-    let target_db_path = app_data_dir.join(db_name);
-
-    // 3. Si no existe en la carpeta de datos, lo copiamos por primera vez
-    if !target_db_path.exists() {
-        fs::copy(&resource_path, &target_db_path).expect("Error al copiar base de datos inicial");
-    }
-
-    // 4. Abrir la conexión desde la carpeta con permisos
-    let conn = Connection::open(target_db_path).expect("Error al conectar con la base de datos");
-    
-    // Optimizaciones de alto rendimiento
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL; 
-         PRAGMA synchronous = NORMAL; 
-         PRAGMA cache_size = -64000; 
-         PRAGMA temp_store = MEMORY;"
-    ).unwrap();
-    
-    conn
-}
-
-// ==========================================
-// COMANDOS (Cantos, Multimedia, Biblia, etc.)
-// ==========================================
-
 #[tauri::command]
 fn get_all_cantos(state: State<AppState>) -> Result<Vec<Canto>, String> {
     let conn = state.cantos_db.lock().map_err(|_| "Error de concurrencia")?;
@@ -142,6 +104,9 @@ fn delete_canto(id: i32, state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// ==========================================
+// COMANDOS DE IMÁGENES
+// ==========================================
 #[tauri::command]
 fn get_all_images(state: State<AppState>) -> Result<Vec<Imagen>, String> {
     let conn = state.multimedia_db.lock().unwrap();
@@ -171,6 +136,9 @@ fn update_image_aspect(id: i32, aspecto: String, state: State<AppState>) -> Resu
     Ok(())
 }
 
+// ==========================================
+// COMANDOS DE VIDEOS
+// ==========================================
 #[tauri::command]
 fn get_all_videos(state: State<AppState>) -> Result<Vec<Video>, String> {
     let conn = state.multimedia_db.lock().unwrap();
@@ -179,7 +147,7 @@ fn get_all_videos(state: State<AppState>) -> Result<Vec<Video>, String> {
         id: row.get(0)?, 
         nombre: row.get(1)?, 
         ruta: row.get(2)?,
-        bucle: row.get::<_, i32>(3)? != 0
+        bucle: row.get::<_, i32>(3)? != 0 // Convertir INTEGER (0/1) a bool
     })).unwrap();
     Ok(iter.filter_map(Result::ok).collect())
 }
@@ -198,6 +166,7 @@ fn delete_video_db(id: i32, state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// NUEVO COMANDO: Bucle de video
 #[tauri::command]
 fn update_video_loop(id: i32, bucle: bool, state: State<AppState>) -> Result<(), String> {
     let conn = state.multimedia_db.lock().unwrap();
@@ -209,7 +178,10 @@ fn update_video_loop(id: i32, bucle: bool, state: State<AppState>) -> Result<(),
 #[tauri::command]
 async fn select_video_file(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
-    let file_path = app.dialog().file().add_filter("Videos", &["mp4", "webm", "mkv", "mov", "avi"]).blocking_pick_file();
+    let file_path = app.dialog()
+        .file()
+        .add_filter("Videos", &["mp4", "webm", "mkv", "mov", "avi"])
+        .blocking_pick_file();
     file_path.map(|path| path.to_string())
 }
 
@@ -220,35 +192,9 @@ fn trigger_video_control(app: tauri::AppHandle, action: String) {
     }
 }
 
-#[tauri::command]
-async fn get_all_pdfs(state: State<'_, AppState>) -> Result<Vec<PdfDoc>, String> {
-    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, nombre, ruta FROM pdfs ORDER BY id DESC").unwrap();
-    let iter = stmt.query_map([], |row| Ok(PdfDoc { id: row.get(0)?, nombre: row.get(1)?, ruta: row.get(2)? })).unwrap();
-    Ok(iter.filter_map(Result::ok).collect())
-}
-
-#[tauri::command]
-async fn add_pdf_db(nombre: String, ruta: String, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
-    conn.execute("INSERT INTO pdfs (nombre, ruta) VALUES (?, ?)", params![nombre, ruta]).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn delete_pdf_db(id: i32, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM pdfs WHERE id = ?", params![id]).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn select_pdf_file(app: tauri::AppHandle) -> Option<String> {
-    use tauri_plugin_dialog::DialogExt;
-    let file_path = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file();
-    file_path.map(|path| path.to_string())
-}
-
+// ==========================================
+// COMANDOS BIBLIA Y GENERALES
+// ==========================================
 #[tauri::command]
 async fn select_background_image(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
@@ -324,6 +270,64 @@ async fn open_projector(app: tauri::AppHandle) {
     }
 }
 
+// ==========================================
+// COMANDOS PDF
+// ==========================================
+#[derive(Serialize)]
+struct PdfDoc { id: i32, nombre: String, ruta: String }
+
+#[tauri::command]
+async fn get_all_pdfs(state: State<'_, AppState>) -> Result<Vec<PdfDoc>, String> {
+    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, nombre, ruta FROM pdfs ORDER BY id DESC").unwrap();
+    let iter = stmt.query_map([], |row| Ok(PdfDoc { id: row.get(0)?, nombre: row.get(1)?, ruta: row.get(2)? })).unwrap();
+    Ok(iter.filter_map(Result::ok).collect())
+}
+
+#[tauri::command]
+async fn add_pdf_db(nombre: String, ruta: String, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO pdfs (nombre, ruta) VALUES (?, ?)", params![nombre, ruta]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_pdf_db(id: i32, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM pdfs WHERE id = ?", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn select_pdf_file(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let file_path = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file();
+    file_path.map(|path| path.to_string())
+}
+
+
+/*fn setup_db(db_name: &str) -> Connection {
+    let conn = Connection::open(db_name).expect(&format!("No se pudo abrir {}", db_name));
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -64000; PRAGMA temp_store = MEMORY;").unwrap();
+    conn
+}*/
+
+fn setup_multimedia_db(path: PathBuf) -> Connection {
+    let conn = setup_db(path);;
+    
+    // TABLA DE IMÁGENES
+    conn.execute("CREATE TABLE IF NOT EXISTS imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, aspecto TEXT DEFAULT 'contain')", []).unwrap();
+    let _ = conn.execute("ALTER TABLE imagenes ADD COLUMN aspecto TEXT DEFAULT 'contain'", []);
+    
+    // TABLA DE VIDEOS (Agregada la columna de bucle)
+    conn.execute("CREATE TABLE IF NOT EXISTS videos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, bucle INTEGER DEFAULT 0)", []).unwrap();
+    let _ = conn.execute("ALTER TABLE videos ADD COLUMN bucle INTEGER DEFAULT 0", []);
+    
+    conn.execute("CREATE TABLE IF NOT EXISTS pdfs (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL)", []).unwrap();
+
+    conn
+}
+
 #[tauri::command]
 async fn export_cantos(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<String, String> {
     use tauri_plugin_dialog::DialogExt;
@@ -371,6 +375,8 @@ async fn import_cantos(app: tauri::AppHandle, state: tauri::State<'_, AppState>)
 
     let json_str = read_to_string(&path).map_err(|e| e.to_string())?;
     let import_data: Vec<CantoExport> = serde_json::from_str(&json_str).map_err(|e| format!("Archivo inválido: {}", e))?;
+    
+    
     let total_importados = import_data.len();
 
     let conn = state.cantos_db.lock().map_err(|e| e.to_string())?;
@@ -392,12 +398,44 @@ async fn import_cantos(app: tauri::AppHandle, state: tauri::State<'_, AppState>)
     }
 
     let _ = app.emit("reload-cantos", ()); 
+    
+    
     Ok(format!("Se importaron {} cantos correctamente.", total_importados))
+
 }
 
-// ==========================================
-// FUNCIÓN PRINCIPAL MAIN
-// ==========================================
+fn get_db_path(app: &tauri::AppHandle, db_name: &str) -> PathBuf {
+    // Obtiene la ruta de datos: AppData/Roaming/com.easypresenter.app
+    let app_dir = app.path().app_data_dir().expect("No se pudo obtener la ruta de datos");
+    
+    if !app_dir.exists() {
+        fs::create_dir_all(&app_dir).expect("No se pudo crear la carpeta de datos");
+    }
+
+    let db_path = app_dir.join(db_name);
+
+    // Si la DB no está en AppData, la copiamos desde los Recursos (folder del instalador)
+    if !db_path.exists() {
+        // En Tauri v2 se usa resolve con BaseDirectory::Resource
+        if let Ok(resource_path) = app.path().resolve(db_name, BaseDirectory::Resource) {
+            let _ = fs::copy(resource_path, &db_path);
+        }
+    }
+
+    db_path
+}
+
+fn setup_db(path: PathBuf) -> Connection {
+    let conn = Connection::open(path).expect("No se pudo abrir la base de datos");
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL; 
+         PRAGMA synchronous = NORMAL; 
+         PRAGMA cache_size = -64000; 
+         PRAGMA temp_store = MEMORY;"
+    ).unwrap();
+    conn
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -406,28 +444,21 @@ fn main() {
         .setup(|app| {
             let handle = app.handle();
             
-            // Usamos nuestra nueva función todoterreno para cada DB
+            // Resolvemos rutas seguras
+            let c_path = get_db_path(handle, "cantos.db");
+            let b_path = get_db_path(handle, "biblias.db");
+            let m_path = get_db_path(handle, "multimedia.db");
+
             let app_state = AppState {
-                cantos_db: Mutex::new(get_db_connection(handle, "cantos.db")),
-                biblias_db: Mutex::new(get_db_connection(handle, "biblias.db")),
-                multimedia_db: Mutex::new(get_db_connection(handle, "multimedia.db")),
+                cantos_db: Mutex::new(setup_db(c_path)),
+                biblias_db: Mutex::new(setup_db(b_path)),
+                multimedia_db: Mutex::new(setup_multimedia_db(m_path)),
             };
-
-            // Asegurar que las tablas multimedia existan después de conectar
-            {
-                let conn = app_state.multimedia_db.lock().unwrap();
-                conn.execute("CREATE TABLE IF NOT EXISTS imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, aspecto TEXT DEFAULT 'contain')", []).unwrap();
-                conn.execute("CREATE TABLE IF NOT EXISTS videos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL, bucle INTEGER DEFAULT 0)", []).unwrap();
-                conn.execute("CREATE TABLE IF NOT EXISTS pdfs (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, ruta TEXT NOT NULL)", []).unwrap();
-                
-                // Intento silencioso de agregar columnas por si es una actualización
-                let _ = conn.execute("ALTER TABLE imagenes ADD COLUMN aspecto TEXT DEFAULT 'contain'", []);
-                let _ = conn.execute("ALTER TABLE videos ADD COLUMN bucle INTEGER DEFAULT 0", []);
-            }
-
+            
             app.manage(app_state);
             Ok(())
         })
+
         .invoke_handler(tauri::generate_handler![
             open_projector,
             get_bible_versions,
@@ -449,12 +480,13 @@ fn main() {
             get_all_videos,
             add_video_db,
             delete_video_db,
-            update_video_loop,
+            update_video_loop, // <--- Comando Registrado
             select_video_file,
             trigger_video_control,
             get_all_pdfs,
             add_pdf_db,
             delete_pdf_db,
+            select_pdf_file,
             select_pdf_file,
             export_cantos,
             import_cantos
