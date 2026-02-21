@@ -126,7 +126,9 @@ const ProjectorView = () => {
          style={{ backgroundColor: isText ? (currentStyle?.bgColor || '#000') : '#000', color: currentStyle?.textColor || '#fff' }}>
       
       {/* 1. CAPA PDF */}
+      {/* 1. CAPA PDF */}
       <iframe 
+          key={isPdf ? `${displayVerse.ruta}-${displayVerse.pagina}` : 'pdf-layer'}
           className={`absolute inset-0 w-full h-full border-none pointer-events-none transition-opacity duration-300 z-50 ${isPdf ? 'opacity-100' : 'opacity-0'}`}
           src={isPdf ? `${convertFileSrc(displayVerse.ruta)}#page=${displayVerse.pagina}&view=FitH&toolbar=0&navpanes=0&scrollbar=0` : ''} 
           style={{ visibility: isPdf ? 'visible' : 'hidden' }}
@@ -379,7 +381,7 @@ const BiblesLibrary = ({ onSelectChapter, onDirectSearch, currentVersion, onVers
 
   const handleSearchChange = (e: any) => {
     const val = e.target.value; setSearch(val);
-    if (val && !val.match(/\d/) && books.length > 0) {
+    if (val && books.length > 0) {
         const normVal = normalizeText(val); const match = books.find(b => normalizeText(b.nombre).startsWith(normVal));
         if (match && normalizeText(match.nombre) !== normVal) setSuggestion(match.nombre); else setSuggestion("");
     } else { setSuggestion(""); }
@@ -434,7 +436,7 @@ const handleKeyDown = (e: any) => {
         </select>
         <div className="flex-1 relative group">
           <Search className="absolute left-2 top-2.5 text-gray-500 group-focus-within:text-accent transition-colors" size={12} />
-          {suggestion && search && !search.match(/\d/) && normalizeText(suggestion).startsWith(normalizeText(search)) && (
+          {suggestion && search  && normalizeText(suggestion).startsWith(normalizeText(search)) && (
              <div className="absolute left-8 top-2 text-[10px] text-gray-500 pointer-events-none font-mono flex"><span className="opacity-0">{search}</span><span className="opacity-50">{suggestion.slice(search.length)}</span></div>
           )}
           <input type="text" placeholder="Ej: Rut 1..." value={search} onChange={handleSearchChange} onKeyDown={handleKeyDown} className="w-full bg-panel border border-white/10 rounded py-2 pl-8 pr-2 text-[10px] focus:border-accent outline-none font-medium placeholder:text-gray-600 relative z-10 bg-transparent" />
