@@ -379,23 +379,29 @@ async fn import_cantos(app: tauri::AppHandle, state: tauri::State<'_, AppState>)
     
     let total_importados = import_data.len();
 
-    let conn = state.cantos_db.lock().map_err(|e| e.to_string())?;
+    let mut conn = state.cantos_db.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
     for canto in import_data {
-        let mut stmt = conn.prepare("SELECT id FROM cantos WHERE titulo = ?").unwrap();
+        let mut stmt = tx.prepare("SELECT id FROM cantos WHERE titulo = ?").unwrap();
         let exists: Option<i32> = stmt.query_row([&canto.titulo], |row| row.get(0)).ok();
+        drop(stmt); // Liberamos la consulta antes de modificar la base de datos
 
         let canto_id = if let Some(id) = exists {
-            conn.execute("DELETE FROM diapositivas WHERE canto_id = ?", [id]).unwrap();
+            tx.execute("DELETE FROM diapositivas WHERE canto_id = ?", [id]).unwrap();
             id as i64
         } else {
-            conn.execute("INSERT INTO cantos (titulo, tono, categoria) VALUES (?, ?, ?)", [&canto.titulo, &canto.tono, &canto.categoria]).unwrap();
-            conn.last_insert_rowid()
+            tx.execute("INSERT INTO cantos (titulo, tono, categoria) VALUES (?, ?, ?)", [&canto.titulo, &canto.tono, &canto.categoria]).unwrap();
+            tx.last_insert_rowid()
         };
 
         for (i, letra) in canto.letras.iter().enumerate() {
-            conn.execute("INSERT INTO diapositivas (canto_id, orden, texto) VALUES (?, ?, ?)", params![canto_id, (i as i32) + 1, letra]).unwrap();
+            tx.execute("INSERT INTO diapositivas (canto_id, orden, texto) VALUES (?, ?, ?)", params![canto_id, (i as i32) + 1, letra]).unwrap();
         }
     }
+
+    // Ejecutamos todo de un solo golpe en el disco
+    tx.commit().map_err(|e| e.to_string())?;
 
     let _ = app.emit("reload-cantos", ()); 
     
@@ -454,6 +460,20 @@ fn main() {
                 biblias_db: Mutex::new(setup_db(b_path)),
                 multimedia_db: Mutex::new(setup_multimedia_db(m_path)),
             };
+
+            {
+                let conn_biblia = app_state.biblias_db.lock().unwrap();
+                conn_biblia.execute_batch(
+                    "CREATE INDEX IF NOT EXISTS idx_versiculos_busqueda ON versiculos(version_id, libro_nombre, capitulo, versiculo);
+                     CREATE INDEX IF NOT EXISTS idx_versiculos_texto ON versiculos(texto);"
+                ).unwrap_or_else(|e| println!("Nota índices biblias: {}", e));
+
+                let conn_cantos = app_state.cantos_db.lock().unwrap();
+                conn_cantos.execute_batch(
+                    "CREATE INDEX IF NOT EXISTS idx_cantos_titulo ON cantos(titulo);
+                     CREATE INDEX IF NOT EXISTS idx_diapositivas_canto ON diapositivas(canto_id);"
+                ).unwrap_or_else(|e| println!("Nota índices cantos: {}", e));
+            }
             
             app.manage(app_state);
             Ok(())

@@ -32,8 +32,8 @@ const ProjectorView = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLParagraphElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const bgVideoRef = useRef<HTMLVideoElement>(null); // Referencia al video de fondo
 
-  // NUEVO: Agregamos bgVideo al estado
   const [styles, setStyles] = useState({ 
       biblia: { bgColor: '#000000', textColor: '#ffffff', bgImage: '', bgVideo: '' },
       cantos: { bgColor: '#000000', textColor: '#ffffff', bgImage: '', bgVideo: '' }
@@ -60,19 +60,32 @@ const ProjectorView = () => {
   useEffect(() => {
     if (!liveVerse) return;
     setOpacity(0);
-    const timeout = setTimeout(() => { setDisplayVerse(liveVerse); }, 250);
+    // OPTIMIZACIÓN: Reducimos el tiempo de transición para que se sienta más responsivo
+    const timeout = setTimeout(() => { setDisplayVerse(liveVerse); }, 150);
     return () => clearTimeout(timeout);
   }, [liveVerse]);
 
+  // OPTIMIZACIÓN DEL WHILE LOOP: Búsqueda Binaria más rápida y segura
   useLayoutEffect(() => {
     if (!displayVerse || displayVerse.tipo === 'imagen' || displayVerse.tipo === 'video' || displayVerse.tipo === 'pdf' || !containerRef.current || !textRef.current) {
-        if (displayVerse?.tipo === 'imagen' || displayVerse?.tipo === 'video' || displayVerse?.tipo === 'pdf') requestAnimationFrame(() => setOpacity(1));
+        if (displayVerse?.tipo === 'imagen' || displayVerse?.tipo === 'video' || displayVerse?.tipo === 'pdf') {
+            requestAnimationFrame(() => setOpacity(1));
+        }
         return;
     }
+    
     const container = containerRef.current;
     const text = textRef.current;
-    let min = 20; let max = 300; let best = 20;
+    
+    // Evitamos cálculos si el texto está vacío
+    if (!displayVerse.texto || displayVerse.texto.trim() === "") {
+        setOpacity(1);
+        return;
+    }
 
+    let min = 20; let max = 250; let best = 20;
+    
+    // Búsqueda binaria controlada para no colgar el hilo principal
     while (min <= max) {
         const mid = Math.floor((min + max) / 2);
         text.style.fontSize = `${mid}px`;
@@ -80,80 +93,101 @@ const ProjectorView = () => {
             best = mid; min = mid + 1;  
         } else { max = mid - 1; }
     }
-    const finalSize = best - 2;
+    
+    const finalSize = Math.max(20, best - 2);
     setFontSize(finalSize);
     text.style.fontSize = `${finalSize}px`;
     requestAnimationFrame(() => setOpacity(1));
   }, [displayVerse]);
 
-  // ---> AQUÍ AGREGAMOS EL RENDER DEL PDF
-  if (displayVerse?.tipo === 'pdf') {
-      return (
-          <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
-              <iframe 
-                  key={`${displayVerse.ruta}-${displayVerse.pagina}`}
-                  src={`${convertFileSrc(displayVerse.ruta)}#page=${displayVerse.pagina}&view=FitH&toolbar=0&navpanes=0&scrollbar=0`} 
-                  className="w-full h-full border-none bg-black pointer-events-none" 
-              />
-          </div>
-      );
-  }
-
-  // RENDER: VIDEO MULTIMEDIA
-  if (displayVerse?.tipo === 'video') {
-      return (
-          <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
-              <video 
-                  ref={videoRef}
-                  src={convertFileSrc(displayVerse.ruta)} 
-                  className="w-full h-full object-contain" 
-                  autoPlay 
-                  loop={displayVerse.bucle} // <--- APLICAMOS EL BUCLE
-              />
-          </div>
-      );
-  }
-
-  // RENDER: IMAGEN MULTIMEDIA
-  if (displayVerse?.tipo === 'imagen') {
-      const fitClass = displayVerse.aspecto === 'cover' ? 'w-full h-full object-cover' : displayVerse.aspecto === 'fill' ? 'w-full h-full object-fill' : 'max-w-full max-h-full object-contain'; 
-      return (
-          <div className="h-screen w-screen bg-black transition-opacity duration-500 flex items-center justify-center overflow-hidden" style={{ opacity }}>
-              <img src={convertFileSrc(displayVerse.ruta)} className={fitClass} />
-          </div>
-      );
-  }
-
-  // RENDER: TEXTO CON FONDO (IMAGEN O VIDEO)
+  // Variables de control de visualización
   const isCanto = displayVerse?.capitulo === 0;
   const currentStyle = isCanto ? styles.cantos : styles.biblia;
   
+  const isPdf = displayVerse?.tipo === 'pdf';
+  const isVideo = displayVerse?.tipo === 'video';
+  const isImage = displayVerse?.tipo === 'imagen';
+  const isText = displayVerse && !isPdf && !isVideo && !isImage;
+
+  // Calculamos la clase de ajuste para imágenes
+  const imgFitClass = displayVerse?.aspecto === 'cover' ? 'object-cover' : displayVerse?.aspecto === 'fill' ? 'object-fill' : 'object-contain'; 
+
+  // OPTIMIZACIÓN: Pre-buffering inteligente.
+  // Si hay un video configurado como fondo, lo precargamos incluso si no es visible.
+  useEffect(() => {
+      if (currentStyle?.bgVideo && bgVideoRef.current) {
+          bgVideoRef.current.load();
+      }
+  }, [currentStyle?.bgVideo]);
+
+  // OPTIMIZACIÓN RENDER: Todos los elementos existen en el DOM, solo se ocultan.
   return (
-    <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden transition-all duration-500 relative" style={{ backgroundColor: currentStyle?.bgColor || '#000', color: currentStyle?.textColor || '#fff' }}>
+    <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden transition-all duration-300 relative bg-black" 
+         style={{ backgroundColor: isText ? (currentStyle?.bgColor || '#000') : '#000', color: currentStyle?.textColor || '#fff' }}>
       
-      {/* CAPA DE FONDO: Imagen o Video */}
-      {currentStyle?.bgImage && <img src={convertFileSrc(currentStyle.bgImage)} className="absolute inset-0 w-full h-full object-cover z-0" />}
-      {currentStyle?.bgVideo && <video src={convertFileSrc(currentStyle.bgVideo)} autoPlay loop muted className="absolute inset-0 w-full h-full object-cover z-0" />}
-      
-      {/* CAPA DE TEXTO */}
-      {displayVerse && (
-        <div className="w-full h-full flex flex-col justify-between transition-opacity duration-300 px-8 py-8 relative z-10" style={{ opacity }}>
-          <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
-            <p ref={textRef} style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} className="font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line drop-shadow-md">
-                {isCanto ? displayVerse.texto : `"${displayVerse.texto}"`}
-            </p>
-          </div>
-          {!isCanto && (
-            <div className="flex justify-end mt-4 shrink-0">
-               <div className="border-r-8 pr-4" style={{ borderColor: currentStyle.textColor === '#ffffff' ? '#3b82f6' : currentStyle.textColor }}>
-                  <p className="text-5xl font-black italic uppercase tracking-widest drop-shadow-md">
-                     {displayVerse.libro} {displayVerse.capitulo}:{displayVerse.versiculo}
-                  </p>
-               </div>
-            </div>
+      {/* 1. CAPA PDF */}
+      <iframe 
+          className={`absolute inset-0 w-full h-full border-none pointer-events-none transition-opacity duration-300 z-50 ${isPdf ? 'opacity-100' : 'opacity-0'}`}
+          src={isPdf ? `${convertFileSrc(displayVerse.ruta)}#page=${displayVerse.pagina}&view=FitH&toolbar=0&navpanes=0&scrollbar=0` : ''} 
+          style={{ visibility: isPdf ? 'visible' : 'hidden' }}
+      />
+
+      {/* 2. CAPA VIDEO MULTIMEDIA */}
+      <video 
+          ref={videoRef}
+          className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 z-40 ${isVideo ? 'opacity-100' : 'opacity-0'}`}
+          src={isVideo ? convertFileSrc(displayVerse.ruta) : ''} 
+          autoPlay={isVideo} 
+          loop={displayVerse?.bucle}
+          preload="auto" // Pre-buffering para el disco HDD
+          style={{ visibility: isVideo ? 'visible' : 'hidden' }}
+      />
+
+      {/* 3. CAPA IMAGEN MULTIMEDIA */}
+      <img 
+          className={`absolute inset-0 w-full h-full transition-opacity duration-300 z-30 ${imgFitClass} ${isImage ? 'opacity-100' : 'opacity-0'}`}
+          src={isImage ? convertFileSrc(displayVerse.ruta) : ''}
+          style={{ visibility: isImage ? 'visible' : 'hidden' }}
+      />
+
+      {/* 4. CAPAS DE TEXTO Y FONDOS */}
+      <div className={`absolute inset-0 w-full h-full transition-opacity duration-300 z-20 ${isText ? 'opacity-100' : 'opacity-0'}`} style={{ opacity: isText ? opacity : 0, visibility: isText ? 'visible' : 'hidden' }}>
+          
+          {/* Fondo de Texto: Imagen */}
+          {currentStyle?.bgImage && (
+             <img src={convertFileSrc(currentStyle.bgImage)} className="absolute inset-0 w-full h-full object-cover z-0" />
           )}
-        </div>
-      )}
+          
+          {/* Fondo de Texto: Video */}
+          {currentStyle?.bgVideo && (
+             <video ref={bgVideoRef} src={convertFileSrc(currentStyle.bgVideo)} autoPlay loop muted preload="auto" className="absolute inset-0 w-full h-full object-cover z-0" />
+          )}
+          
+          {/* OPTIMIZACIÓN: Si hay video de fondo, ponemos una capa oscura semi-transparente para mejorar el rendimiento de la sombra del texto */}
+          {currentStyle?.bgVideo && (
+              <div className="absolute inset-0 w-full h-full bg-black/30 z-0"></div>
+          )}
+
+          {/* Contenedor del Texto */}
+          <div className="w-full h-full flex flex-col justify-between px-8 py-8 relative z-10">
+            <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
+              <p ref={textRef} 
+                 style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} 
+                 className={`font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line ${currentStyle?.bgVideo ? 'text-shadow-strong' : 'drop-shadow-md'}`}>
+                  {isText ? (isCanto ? displayVerse.texto : `"${displayVerse.texto}"`) : ''}
+              </p>
+            </div>
+            {isText && !isCanto && (
+              <div className="flex justify-end mt-4 shrink-0">
+                 <div className="border-r-8 pr-4" style={{ borderColor: currentStyle.textColor === '#ffffff' ? '#3b82f6' : currentStyle.textColor }}>
+                    <p className={`text-5xl font-black italic uppercase tracking-widest ${currentStyle?.bgVideo ? 'text-shadow-strong' : 'drop-shadow-md'}`}>
+                       {displayVerse.libro} {displayVerse.capitulo}:{displayVerse.versiculo}
+                    </p>
+                 </div>
+              </div>
+            )}
+          </div>
+      </div>
     </div>
   );
 };
@@ -666,7 +700,7 @@ const VideosLibrary = ({ onSelectVideo, onProjectVideo, onVideoDeleted, onVideoL
                                         <ChevronRight size={12} className={showLoopSubMenu ? "text-accent" : ""} />
                                     </button>
                                     {showLoopSubMenu && (
-                                        <div className="absolute top-0 left-[98%] bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-48 animate-in slide-in-from-left-2 duration-150 z-50">
+                                        <div className="absolute top-0 right-[98%] bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-48 animate-in slide-in-from-right-2 duration-150 z-50">
                                             <button onClick={() => handleLoopChange(false)} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${!contextMenu.video.bucle ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>Normal (Una vez)</button>
                                             <button onClick={() => handleLoopChange(true)} className={`w-full text-left px-4 py-2 text-[11px] font-bold flex items-center gap-2 ${contextMenu.video.bucle ? 'text-accent bg-accent/10' : 'text-gray-300 hover:bg-white/5'}`}>Bucle Infinito</button>
                                         </div>
