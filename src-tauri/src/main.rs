@@ -324,8 +324,9 @@ fn extraer_paginas_pdf(app: &tauri::AppHandle, ruta_pdf: &str, ruta_carpeta_sali
     // ------------------------------------------------
 
     let pdfium = Pdfium::new(
-        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
-            .or_else(|_| Pdfium::bind_to_system_library())?
+    Pdfium::bind_to_library(lib_name) // <--- Ahora sí usamos la variable
+        .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./")))
+        .or_else(|_| Pdfium::bind_to_system_library())?
     );
 
     let documento = pdfium.load_pdf_from_file(ruta_pdf, None)?;
