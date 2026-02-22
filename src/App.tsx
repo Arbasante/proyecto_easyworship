@@ -988,7 +988,7 @@ const DashboardLayout = () => {
   const scrollRef = useRef<HTMLDivElement>(null); 
 
   // ---> NUEVO: Estado para almacenar el PDF binario
-  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+  const [_pdfBlob, _setPdfBlob] = useState<Blob | null>(null);
   
   
 

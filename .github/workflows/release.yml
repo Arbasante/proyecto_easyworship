@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         # Aquí definimos las 3 computadoras virtuales
-        platform: [windows-latest, ubuntu-22.04, macos-latest]
+        platform: [windows-latest, ubuntu-22.04]
 
     runs-on: ${{ matrix.platform }}
 
@@ -24,7 +24,7 @@ jobs:
       - name: Instalar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
 
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
