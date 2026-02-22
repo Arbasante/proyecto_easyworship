@@ -314,6 +314,15 @@ async fn add_pdf_db(app: tauri::AppHandle, nombre: String, ruta: String, state: 
 fn extraer_paginas_pdf(app: &tauri::AppHandle, ruta_pdf: &str, ruta_carpeta_salida: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let _ = app.emit("pdf-progress", serde_json::json!({ "current": 0, "total": 0, "status": "Iniciando motor PDF..." }));
 
+    // --- AQUÍ VA EL CÓDIGO DE SELECCIÓN DE LIBRERÍA ---
+    #[cfg(target_os = "linux")]
+    let lib_name = "libpdfium.so";
+
+    #[cfg(target_os = "windows")]
+    let lib_name = "pdfium.dll";
+
+    // ------------------------------------------------
+
     let pdfium = Pdfium::new(
         Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
             .or_else(|_| Pdfium::bind_to_system_library())?
