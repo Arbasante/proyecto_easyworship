@@ -2,7 +2,8 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
 import { Music, BookOpen, Image as ImageIcon, Video, FileText, Star, MonitorPlay, Search, ChevronLeft, ChevronRight, Settings, Trash2, Palette, X, Plus, Edit2, AlertTriangle, Type, Maximize, Minimize, Play, Pause, RotateCcw, Clapperboard } from "lucide-react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
+
 
 // --- UTILIDADES ---
 const normalizeText = (text: string) => {
@@ -39,6 +40,9 @@ const ProjectorView = () => {
       cantos: { bgColor: '#000000', textColor: '#ffffff', bgImage: '', bgVideo: '' }
   });
 
+  // CORRECCIÓN 1: El estado de los márgenes debe ir AQUÍ AFUERA, no dentro del useEffect
+  const [margins, setMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
+
   useEffect(() => {
     const un1 = listen("update-proyeccion", (e: any) => setLiveVerse(e.payload));
     const un2 = listen("update-styles", (e: any) => setStyles(e.payload));
@@ -54,7 +58,9 @@ const ProjectorView = () => {
         }
     });
 
-    return () => { un1.then(f => f()); un2.then(f => f()); un3.then(f => f()); };
+    const un4 = listen("update-margins", (e: any) => setMargins(e.payload));
+
+    return () => { un1.then(f => f()); un2.then(f => f()); un3.then(f => f()); un4.then(f => f()); };
   }, []);
 
   useEffect(() => {
@@ -109,6 +115,7 @@ const ProjectorView = () => {
   const isImage = displayVerse?.tipo === 'imagen';
   const isText = displayVerse && !isPdf && !isVideo && !isImage;
 
+
   // Calculamos la clase de ajuste para imágenes
   const imgFitClass = displayVerse?.aspecto === 'cover' ? 'object-cover' : displayVerse?.aspecto === 'fill' ? 'object-fill' : 'object-contain'; 
 
@@ -122,77 +129,95 @@ const ProjectorView = () => {
 
   // OPTIMIZACIÓN RENDER: Todos los elementos existen en el DOM, solo se ocultan.
   return (
-    <div className="h-screen w-screen flex flex-col justify-center items-center select-none overflow-hidden transition-all duration-300 relative bg-black" 
-         style={{ backgroundColor: isText ? (currentStyle?.bgColor || '#000') : '#000', color: currentStyle?.textColor || '#fff' }}>
+    <div className="h-screen w-screen bg-black overflow-hidden relative select-none">
+        
+      {/* WRAPPER DE ÁREA SEGURA PARA EL TELÓN */}
+      <div 
+        className="absolute transition-all duration-300 flex flex-col justify-center items-center overflow-hidden"
+        style={{ 
+          top: `${margins.top}%`, 
+          bottom: `${margins.bottom}%`, 
+          left: `${margins.left}%`, 
+          right: `${margins.right}%`,
+          backgroundColor: isText ? (currentStyle?.bgColor || '#000') : '#000', 
+          color: currentStyle?.textColor || '#fff' 
+        }}
+      >
       
-      {/* 1. CAPA PDF */}
-      {/* 1. CAPA PDF */}
-      <iframe 
-          key={isPdf ? `${displayVerse.ruta}-${displayVerse.pagina}` : 'pdf-layer'}
-          className={`absolute inset-0 w-full h-full border-none pointer-events-none transition-opacity duration-300 z-50 ${isPdf ? 'opacity-100' : 'opacity-0'}`}
-          src={isPdf ? `${convertFileSrc(displayVerse.ruta)}#page=${displayVerse.pagina}&view=FitH&toolbar=0&navpanes=0&scrollbar=0` : ''} 
-          style={{ visibility: isPdf ? 'visible' : 'hidden' }}
-      />
+        {/* 1. CAPA PDF (Ahora renderizada como imagen estática pre-procesada) */}
+        <div className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-300 z-50 flex items-center justify-center ${isPdf ? 'opacity-100' : 'opacity-0'}`} style={{ visibility: isPdf ? 'visible' : 'hidden' }}>
+        {isPdf && displayVerse?.ruta && (
+            <img 
+                src={convertFileSrc(`${displayVerse.ruta}/${displayVerse.pagina}.jpg`)} 
+                className="w-full h-full object-contain" 
+                alt="PDF Slide"
+            />
+        )}
+        </div>
 
-      {/* 2. CAPA VIDEO MULTIMEDIA */}
-      <video 
-          ref={videoRef}
-          className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 z-40 ${isVideo ? 'opacity-100' : 'opacity-0'}`}
-          src={isVideo ? convertFileSrc(displayVerse.ruta) : ''} 
-          autoPlay={isVideo} 
-          loop={displayVerse?.bucle}
-          preload="auto" // Pre-buffering para el disco HDD
-          style={{ visibility: isVideo ? 'visible' : 'hidden' }}
-      />
+        {/* 2. CAPA VIDEO MULTIMEDIA */}
+        <video 
+            ref={videoRef}
+            className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 z-40 ${isVideo ? 'opacity-100' : 'opacity-0'}`}
+            src={isVideo ? convertFileSrc(displayVerse.ruta) : ''} 
+            autoPlay={isVideo} 
+            loop={displayVerse?.bucle}
+            preload="auto" // Pre-buffering para el disco HDD
+            style={{ visibility: isVideo ? 'visible' : 'hidden' }}
+        />
 
-      {/* 3. CAPA IMAGEN MULTIMEDIA */}
-      <img 
-          className={`absolute inset-0 w-full h-full transition-opacity duration-300 z-30 ${imgFitClass} ${isImage ? 'opacity-100' : 'opacity-0'}`}
-          src={isImage ? convertFileSrc(displayVerse.ruta) : ''}
-          style={{ visibility: isImage ? 'visible' : 'hidden' }}
-      />
+        {/* 3. CAPA IMAGEN MULTIMEDIA */}
+        <img 
+            className={`absolute inset-0 w-full h-full transition-opacity duration-300 z-30 ${imgFitClass} ${isImage ? 'opacity-100' : 'opacity-0'}`}
+            src={isImage ? convertFileSrc(displayVerse.ruta) : ''}
+            style={{ visibility: isImage ? 'visible' : 'hidden' }}
+        />
 
-      {/* 4. CAPAS DE TEXTO Y FONDOS */}
-      <div className={`absolute inset-0 w-full h-full transition-opacity duration-300 z-20 ${isText ? 'opacity-100' : 'opacity-0'}`} style={{ opacity: isText ? opacity : 0, visibility: isText ? 'visible' : 'hidden' }}>
-          
-          {/* Fondo de Texto: Imagen */}
-          {currentStyle?.bgImage && (
-             <img src={convertFileSrc(currentStyle.bgImage)} className="absolute inset-0 w-full h-full object-cover z-0" />
-          )}
-          
-          {/* Fondo de Texto: Video */}
-          {currentStyle?.bgVideo && (
-             <video ref={bgVideoRef} src={convertFileSrc(currentStyle.bgVideo)} autoPlay loop muted preload="auto" className="absolute inset-0 w-full h-full object-cover z-0" />
-          )}
-          
-          {/* OPTIMIZACIÓN: Si hay video de fondo, ponemos una capa oscura semi-transparente para mejorar el rendimiento de la sombra del texto */}
-          {currentStyle?.bgVideo && (
-              <div className="absolute inset-0 w-full h-full bg-black/30 z-0"></div>
-          )}
-
-          {/* Contenedor del Texto */}
-          <div className="w-full h-full flex flex-col justify-between px-8 py-8 relative z-10">
-            <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
-              <p ref={textRef} 
-                 style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} 
-                 className={`font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line ${currentStyle?.bgVideo ? 'text-shadow-strong' : 'drop-shadow-md'}`}>
-                  {isText ? (isCanto ? displayVerse.texto : `"${displayVerse.texto}"`) : ''}
-              </p>
-            </div>
-            {isText && !isCanto && (
-              <div className="flex justify-end mt-4 shrink-0">
-                 <div className="border-r-8 pr-4" style={{ borderColor: currentStyle.textColor === '#ffffff' ? '#3b82f6' : currentStyle.textColor }}>
-                    <p className={`text-5xl font-black italic uppercase tracking-widest ${currentStyle?.bgVideo ? 'text-shadow-strong' : 'drop-shadow-md'}`}>
-                       {displayVerse.libro} {displayVerse.capitulo}:{displayVerse.versiculo}
-                    </p>
-                 </div>
-              </div>
+        {/* 4. CAPAS DE TEXTO Y FONDOS */}
+        <div className={`absolute inset-0 w-full h-full transition-opacity duration-300 z-20 ${isText ? 'opacity-100' : 'opacity-0'}`} style={{ opacity: isText ? opacity : 0, visibility: isText ? 'visible' : 'hidden' }}>
+            
+            {/* Fondo de Texto: Imagen */}
+            {currentStyle?.bgImage && (
+                <img src={convertFileSrc(currentStyle.bgImage)} className="absolute inset-0 w-full h-full object-cover z-0" />
             )}
-          </div>
-      </div>
+            
+            {/* Fondo de Texto: Video */}
+            {currentStyle?.bgVideo && (
+                <video ref={bgVideoRef} src={convertFileSrc(currentStyle.bgVideo)} autoPlay loop muted preload="auto" className="absolute inset-0 w-full h-full object-cover z-0" />
+            )}
+            
+            {/* OPTIMIZACIÓN: Si hay video de fondo, ponemos una capa oscura semi-transparente para mejorar el rendimiento de la sombra del texto */}
+            {currentStyle?.bgVideo && (
+                <div className="absolute inset-0 w-full h-full bg-black/30 z-0"></div>
+            )}
+
+            {/* Contenedor del Texto */}
+            <div className="w-full h-full flex flex-col justify-between px-8 py-8 relative z-10">
+              <div ref={containerRef} className="flex-1 w-full flex items-center justify-center min-h-0 min-w-0">
+                <p ref={textRef} 
+                  style={{ fontSize: `${fontSize}px`, lineHeight: 1.25 }} 
+                  className={`font-bold text-center font-sans w-full max-w-full break-words whitespace-pre-line ${currentStyle?.bgVideo ? 'text-shadow-strong' : 'drop-shadow-md'}`}>
+                    {isText ? (isCanto ? displayVerse.texto : `"${displayVerse.texto}"`) : ''}
+                </p>
+              </div>
+              {isText && !isCanto && (
+                <div className="flex justify-end mt-4 shrink-0">
+                  <div className="border-r-8 pr-4" style={{ borderColor: currentStyle.textColor === '#ffffff' ? '#3b82f6' : currentStyle.textColor }}>
+                      <p className={`text-5xl font-black italic uppercase tracking-widest ${currentStyle?.bgVideo ? 'text-shadow-strong' : 'drop-shadow-md'}`}>
+                          {displayVerse.libro} {displayVerse.capitulo}:{displayVerse.versiculo}
+                      </p>
+                  </div>
+                </div>
+              )}
+            </div>
+        </div>
+
+      {/* CORRECCIÓN 2: Este era el div de cierre que faltaba y nos rompía todo */}
+      </div> 
     </div>
   );
 };
+
 
 // ==========================================
 // EDITOR DE CANTOS
@@ -742,9 +767,15 @@ const PdfLibrary = ({ onSelectPdf, onPdfDeleted }: any) => {
     const [pdfs, setPdfs] = useState<any[]>([]);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, pdf: any | null } | null>(null);
     const [showDeleteModal, setShowDeleteModal] = useState<any>(null);
+    const [pdfProgress, setPdfProgress] = useState<{current: number, total: number, status: string} | null>(null);
 
     const loadPdfs = () => { invoke("get_all_pdfs").then((data: any) => setPdfs(data)); };
     useEffect(() => { loadPdfs(); }, []);
+
+    useEffect(() => {
+        const unlisten = listen("pdf-progress", (e: any) => setPdfProgress(e.payload));
+        return () => { unlisten.then(f => f()); };
+    }, []);
 
     const handleBgContextMenu = (e: React.MouseEvent) => {
         e.preventDefault(); let x = e.clientX; let y = e.clientY;
@@ -769,10 +800,21 @@ const PdfLibrary = ({ onSelectPdf, onPdfDeleted }: any) => {
             if (path) {
                 const pathStr = path as string;
                 const nombre = pathStr.split(/[/\\]/).pop() || "Presentacion";
+                
+                // Iniciamos la animación
+                setPdfProgress({ current: 0, total: 0, status: "Preparando entorno..." });
+                
                 await invoke("add_pdf_db", { nombre, ruta: pathStr });
                 loadPdfs();
+                
+                // Esperamos un segundito antes de ocultar la barra al terminar
+                setTimeout(() => setPdfProgress(null), 1000);
             }
-        } catch (error) { console.error("Error agregando PDF", error); }
+        } catch (error) { 
+            console.error("Error agregando PDF", error); 
+            setPdfProgress(null);
+            alert("Ocurrió un error al procesar el PDF.");
+        }
     };
 
     const handleDeletePdf = async () => {
@@ -832,6 +874,33 @@ const PdfLibrary = ({ onSelectPdf, onPdfDeleted }: any) => {
                             <button onClick={handleDeletePdf} className="flex-1 px-4 py-3 rounded-lg text-[11px] font-bold uppercase text-white bg-red-600 hover:bg-red-500 transition-colors shadow-lg shadow-red-500/20">Sí, Eliminar</button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* BARRA DE PROGRESO FLOTANTE */}
+            {pdfProgress && (
+                <div className="fixed bottom-8 right-8 bg-sidebar border border-white/10 p-5 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-[200] animate-in slide-in-from-bottom-5 min-w-[320px] flex flex-col gap-3">
+                    <div className="flex justify-between items-center">
+                        <span className="text-xs font-black text-gray-200 uppercase tracking-widest flex items-center gap-2">
+                            <FileText size={14} className="text-red-400 animate-pulse" /> 
+                            {pdfProgress.status}
+                        </span>
+                        {pdfProgress.total > 0 && (
+                            <span className="text-[11px] font-black text-accent bg-accent/10 px-2 py-1 rounded">
+                                {pdfProgress.current} / {pdfProgress.total}
+                            </span>
+                        )}
+                    </div>
+                    
+                    {pdfProgress.total > 0 ? (
+                        <div className="w-full bg-black/60 rounded-full h-2.5 overflow-hidden border border-white/5 shadow-inner">
+                            <div className="bg-gradient-to-r from-blue-500 to-accent h-full rounded-full transition-all duration-200 ease-out" style={{ width: `${(pdfProgress.current / pdfProgress.total) * 100}%` }}></div>
+                        </div>
+                    ) : (
+                        <div className="w-full bg-black/60 rounded-full h-2.5 overflow-hidden border border-white/5 relative shadow-inner">
+                             <div className="bg-gradient-to-r from-blue-500 to-accent h-full rounded-full absolute top-0 left-0 w-1/3 animate-ping opacity-70"></div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -897,6 +966,17 @@ const SidebarLeft = ({ favorites, setFavorites, onProjectFavorite }: any) => {
 const DashboardLayout = () => {
   const [currentChapter, setCurrentChapter] = useState<any[]>([]);
   const [activeVersion, setActiveVersion] = useState("");
+  // NUEVOS ESTADOS PARA EL MENÚ Y MÁRGENES
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [showMarginModal, setShowMarginModal] = useState(false);
+  const [margins, setMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
+
+  const handleMarginChange = (axis: string, val: number) => {
+      const newMargins = { ...margins, [axis]: val };
+      setMargins(newMargins);
+      emit("update-margins", newMargins); // Envía los datos al proyector en tiempo real
+  };
+
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   
@@ -906,6 +986,11 @@ const DashboardLayout = () => {
   const [favorites, setFavorites] = useState<any[]>([]);
   const [pdfPage, setPdfPage] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null); 
+
+  // ---> NUEVO: Estado para almacenar el PDF binario
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+  
+  
 
   const [chapterCache, setChapterCache] = useState<Record<string, any[]>>({});
   const [cantoCache, setCantoCache] = useState<Record<number, any[]>>({});
@@ -1090,7 +1175,29 @@ const DashboardLayout = () => {
              </span>
           </div>
           
-          <Settings size={16} className="text-gray-500 hover:text-white cursor-pointer transition-transform hover:rotate-90" onClick={() => setShowSettingsModal(true)} />
+          {/* NUEVO MENÚ DEL ENGRANAJE */}
+          <div className="relative">
+              <Settings 
+                  size={16} 
+                  className={`text-gray-500 hover:text-white cursor-pointer transition-transform ${settingsMenuOpen ? 'rotate-90 text-white' : ''}`} 
+                  onClick={() => setSettingsMenuOpen(!settingsMenuOpen)} 
+              />
+              
+              {settingsMenuOpen && (
+                  <>
+                      <div className="fixed inset-0 z-40" onClick={() => setSettingsMenuOpen(false)}></div>
+                      <div className="absolute right-0 top-6 bg-sidebar border border-white/10 rounded-lg shadow-2xl py-1 w-56 z-50 animate-in fade-in zoom-in duration-150">
+                          <button onClick={() => { setSettingsMenuOpen(false); setShowSettingsModal(true); }} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent">
+                              Importar / Exportar Cantos
+                          </button>
+                          <div className="h-px bg-white/5 my-1 mx-2"></div>
+                          <button onClick={() => { setSettingsMenuOpen(false); setShowMarginModal(true); }} className="w-full text-left px-4 py-3 text-[11px] font-bold text-gray-300 hover:bg-accent/20 hover:text-accent">
+                              Aspecto Segunda Pantalla
+                          </button>
+                      </div>
+                  </>
+              )}
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-10 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-sidebar via-mainbg to-mainbg scrollbar-thin relative" ref={scrollRef}>
@@ -1125,7 +1232,18 @@ const DashboardLayout = () => {
                               <MonitorPlay size={14}/> Sincronizar
                           </button>
                       </div>
-                      <iframe src={`${convertFileSrc(activeBookInfo.ruta)}#page=${pdfPage}&view=FitH&toolbar=0&navpanes=0`} className="w-full flex-1 border-none bg-black" />
+                      {/* Vista previa del PDF convertido a Imagen */}
+                      <div className="w-full flex-1 flex justify-center items-center overflow-hidden bg-black/80 relative">
+                          {activeBookInfo.ruta ? (
+                              <img 
+                                  src={convertFileSrc(`${activeBookInfo.ruta}/${pdfPage}.jpg`)} 
+                                  className="max-h-[450px] shadow-2xl object-contain" 
+                                  alt="Vista previa PDF" 
+                              />
+                          ) : (
+                              <div className="text-gray-500 text-[10px] uppercase font-black">Cargando diapositiva...</div>
+                          )}
+                      </div>
                   </div>
               </div>
 
@@ -1363,6 +1481,56 @@ const DashboardLayout = () => {
 
                 <div className="p-4 bg-black/40 border-t border-white/5 flex justify-end">
                     <button onClick={() => setShowStyleModal(false)} className="bg-white text-black px-6 py-2 rounded-lg text-[10px] font-bold uppercase hover:bg-gray-200 transition-colors">Listo</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* NUEVO MODAL DE MÁRGENES (OVERSCAN) */}
+      {showMarginModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-sidebar border border-white/10 w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+                <div className="flex justify-between items-center p-5 border-b border-white/5 bg-panel/50">
+                    <h2 className="text-xs font-black uppercase text-accent tracking-widest flex items-center gap-2"><Maximize size={14}/> Ajustar Márgenes (Proyector)</h2>
+                    <button onClick={() => setShowMarginModal(false)} className="text-gray-500 hover:text-white transition-colors"><X size={16}/></button>
+                </div>
+
+                <div className="p-8 flex flex-col gap-6">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest text-center leading-relaxed">
+                        Si la imagen se sale de la tela del proyector, <br/> ajusta estos márgenes para centrarla.
+                    </p>
+                    
+                    {/* Controles de slider */}
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-6">
+                        {['top', 'bottom', 'left', 'right'].map((side) => (
+                            <div key={side} className="flex flex-col gap-2">
+                                <label className="text-[10px] font-black uppercase text-gray-300 flex justify-between">
+                                    {side === 'top' ? 'Superior' : side === 'bottom' ? 'Inferior' : side === 'left' ? 'Izquierda' : 'Derecha'}
+                                    <span className="text-accent">{margins[side as keyof typeof margins]}%</span>
+                                </label>
+                                <input 
+                                    type="range" 
+                                    min="0" 
+                                    max="25" 
+                                    value={margins[side as keyof typeof margins]} 
+                                    onChange={(e) => handleMarginChange(side, parseInt(e.target.value))} 
+                                    className="w-full accent-accent" 
+                                />
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Previsualización visual del área segura */}
+                    <div className="aspect-video bg-black rounded-lg border border-white/10 relative overflow-hidden mt-4 flex items-center justify-center">
+                        <div 
+                            className="absolute border-2 border-dashed border-accent/50 bg-accent/10 transition-all duration-75 flex items-center justify-center" 
+                            style={{ top: `${margins.top}%`, bottom: `${margins.bottom}%`, left: `${margins.left}%`, right: `${margins.right}%` }}
+                        >
+                            <span className="text-[10px] font-black text-accent/50 uppercase tracking-widest text-center px-4">
+                                Área Visible <br/> del Proyector
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

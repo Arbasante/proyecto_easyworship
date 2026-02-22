@@ -7,6 +7,10 @@ use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use std::fs;
 use std::path::PathBuf;
 use tauri::path::BaseDirectory;
+use pdfium_render::prelude::*;
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 // --- ESTRUCTURAS ---
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -285,9 +289,65 @@ async fn get_all_pdfs(state: State<'_, AppState>) -> Result<Vec<PdfDoc>, String>
 }
 
 #[tauri::command]
-async fn add_pdf_db(nombre: String, ruta: String, state: State<'_, AppState>) -> Result<(), String> {
+async fn add_pdf_db(app: tauri::AppHandle, nombre: String, ruta: String, state: State<'_, AppState>) -> Result<(), String> {
+    // 1. Obtenemos la carpeta de datos de tu aplicación
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    
+    // 2. Creamos una subcarpeta única para este PDF (ej: /pdfs_MiPresentacion_17080000)
+    let safe_name = nombre.replace(" ", "_").replace(".pdf", "");
+    let folder_name = format!("pdfs_{}_{}", safe_name, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+    let output_folder = app_dir.join(&folder_name);
+
+    // 3. Ejecutamos el motor para convertir el PDF a imágenes dentro de esa carpeta
+    extraer_paginas_pdf(&app, &ruta, &output_folder).map_err(|e| format!("Error procesando PDF: {}", e))?;
+
+    // 4. Guardamos la ruta de la CARPETA en la base de datos (NO el archivo .pdf original)
+    let folder_path_str = output_folder.to_string_lossy().to_string();
     let conn = state.multimedia_db.lock().map_err(|e| e.to_string())?;
-    conn.execute("INSERT INTO pdfs (nombre, ruta) VALUES (?, ?)", params![nombre, ruta]).map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO pdfs (nombre, ruta) VALUES (?, ?)", params![nombre, folder_path_str]).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+// El motor de extracción (Versión Multi-núcleo ultra rápida)
+// El motor de extracción Multi-hilo con Progreso
+fn extraer_paginas_pdf(app: &tauri::AppHandle, ruta_pdf: &str, ruta_carpeta_salida: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = app.emit("pdf-progress", serde_json::json!({ "current": 0, "total": 0, "status": "Iniciando motor PDF..." }));
+
+    let pdfium = Pdfium::new(
+        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+            .or_else(|_| Pdfium::bind_to_system_library())?
+    );
+
+    let documento = pdfium.load_pdf_from_file(ruta_pdf, None)?;
+    fs::create_dir_all(ruta_carpeta_salida)?;
+
+    let total_paginas = documento.pages().len() as usize;
+    let _ = app.emit("pdf-progress", serde_json::json!({ "current": 0, "total": total_paginas, "status": "Leyendo documento..." }));
+
+    let mut imagenes_temporales = Vec::new();
+    for (indice, pagina) in documento.pages().iter().enumerate() {
+        let bitmap = pagina.render_with_config(&PdfRenderConfig::new().set_target_width(1920))?;
+        imagenes_temporales.push((indice + 1, bitmap.as_image())); 
+    }
+
+    // Configuramos los rastreadores multi-hilo
+    let procesadas = Arc::new(AtomicUsize::new(0));
+    let app_h = app.clone(); // Clonamos el manejador para usarlo en los hilos
+
+    // Comprimimos usando todos los núcleos y reportamos progreso
+    imagenes_temporales.into_par_iter().for_each(move |(num_pagina, imagen)| {
+        let ruta_imagen = ruta_carpeta_salida.join(format!("{}.jpg", num_pagina));
+        let _ = imagen.into_rgb8().save_with_format(ruta_imagen, image::ImageFormat::Jpeg);
+        
+        let actual = procesadas.fetch_add(1, Ordering::Relaxed) + 1;
+        let _ = app_h.emit("pdf-progress", serde_json::json!({ 
+            "current": actual, 
+            "total": total_paginas, 
+            "status": "Optimizando imágenes (Multi-núcleo)..." 
+        }));
+    });
+
     Ok(())
 }
 
